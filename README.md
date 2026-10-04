@@ -22,6 +22,12 @@
 
 ---
 
+## 获取源码
+
+```bash
+git clone https://github.com/Durian2005/FaceLogin.git
+cd FaceLogin
+```
 
 ## 怎么运行（一键启动）
 
@@ -166,7 +172,7 @@ SQLite 单文件：`data\faces.db`（首次运行自动创建）
 ## 目录结构
 
 ```
-人脸识别测试实验/
+FaceLogin/
 ├─ 一键启动-无窗口.vbs       一键启动（推荐，无窗口）
 ├─ 一键启动-有窗口.bat       有窗口启动（能看到日志）
 ├─ 停止服务.bat              停止服务
