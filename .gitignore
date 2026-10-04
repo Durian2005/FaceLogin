@@ -21,6 +21,15 @@ data/
 launch_log.txt
 diagnose_result.txt
 
+# ---- 打包产物 ----
+# 第 4 步（工程化与打包）会产生体积很大的构建目录，全部可由源码重建，
+# 且会让仓库变得无法推送，务必不要提交。
+build/
+dist/
+*.spec
+*.exe
+*.msi
+
 # ---- 编辑器 / 操作系统 ----
 .vscode/
 .idea/
