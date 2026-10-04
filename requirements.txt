@@ -1,0 +1,11 @@
+# 运行依赖。安装命令：
+#     pip install -r requirements.txt
+# 启动脚本会自动使用项目内的 .venv（若不存在则按下面的版本号创建）。
+
+Flask==3.1.3
+numpy==2.5.3
+opencv-python-headless==5.0.0.93
+
+# 口令哈希。security.py 在缺失时会自动退回标准库的 scrypt，
+# 但强烈建议装上 —— Argon2id 是当前推荐的密码哈希算法。
+argon2-cffi==25.1.0

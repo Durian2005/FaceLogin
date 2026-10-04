@@ -1,0 +1,29 @@
+# 仓库内统一使用 LF，检出时按平台/类型决定
+* text=auto eol=lf
+
+# ---- Windows 批处理必须是 CRLF ----
+# 本项目的 .bat 一旦被规范化成 LF，cmd 会解析错乱导致窗口秒退。
+# 这是踩过的坑，所以在这里锁死。
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# VBS 同样是 Windows 脚本，CRLF 更稳妥
+*.vbs text eol=crlf
+
+# ---- 二进制：禁止任何换行 / 编码转换 ----
+*.onnx binary
+*.db   binary
+*.jpg  binary
+*.jpeg binary
+*.png  binary
+*.ico  binary
+*.woff binary
+*.woff2 binary
+
+# ---- 明确文本类型，便于 GitHub 语言统计与 diff ----
+*.py text
+*.md text
+*.txt text
+*.json text
+*.yml text
+*.yaml text

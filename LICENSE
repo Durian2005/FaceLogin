@@ -1,0 +1,40 @@
+MIT License
+
+Copyright (c) 2026 Durian2005
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--------------------------------------------------------------------------
+
+本许可证仅覆盖本仓库的**源代码与文档**。
+
+models/ 下的两个 ONNX 模型文件来自 OpenCV Zoo，版权归原作者所有，
+遵循各自的上游许可证，不属于上述 MIT 授权的范围：
+
+  models/face_detection_yunet_2023mar.onnx      MIT License
+      Copyright (c) 2020 Shiqi Yu <shiqi.yu@gmail.com>
+      全文见 models/LICENSE_yunet.txt
+
+  models/face_recognition_sface_2021dec.onnx    Apache License 2.0
+      由 Yaoyao Zhong 贡献（见 OpenCV Zoo 上游 README）
+      全文见 models/LICENSE_sface.txt
+      注：上游 Apache 原文中的版权人是未填写的占位符
+      （`Copyright [yyyy] [name of copyright owner]`），此处照原样保留，未作推断。
+
+再分发本项目时请一并保留 models/ 下的两个许可证文件。

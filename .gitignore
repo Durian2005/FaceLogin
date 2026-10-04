@@ -1,0 +1,32 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# ---- 虚拟环境（体积大，且内部含本机绝对路径）----
+.venv/
+venv/
+env/
+
+# ---- 运行时数据 ----
+# data/faces.db 里存有用户口令哈希、人脸特征向量，以及 Flask 会话签名密钥，
+# 任何情况下都不要提交。
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# ---- 日志与诊断产物 ----
+launch_log.txt
+diagnose_result.txt
+
+# ---- 编辑器 / 操作系统 ----
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+Desktop.ini
+
+# ---- AI 助手工作目录（含本地记忆与本机路径，与项目代码无关）----
+.workbuddy/
