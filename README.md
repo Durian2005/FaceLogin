@@ -171,27 +171,32 @@ SQLite 单文件：`data\faces.db`（首次运行自动创建）
 ├─ 一键启动-有窗口.bat       有窗口启动（能看到日志）
 ├─ 停止服务.bat              停止服务
 ├─ 诊断.bat                  环境诊断
+├─ 打包.bat                  打包成免安装的 Windows 文件夹
 ├─ 使用教程.md               分步使用说明（先看这个）
 ├─ README.md                 本文件
 ├─ LICENSE                   本项目代码与文档的 MIT 许可证
 ├─ requirements.txt          运行依赖
+├─ requirements-dev.txt      仅打包/开发需要的依赖（PyInstaller）
 ├─ app/
 │  ├─ server.py              路由、会话、锁定与审计（服务层）
 │  ├─ db.py                  SQLite 存储层
 │  ├─ security.py            密码哈希与登录策略
 │  ├─ face.py                人脸检测、对齐、特征、比对、头姿代理值
 │  ├─ liveness.py            活体检测：随机动作挑战与姿态采样判定
+│  ├─ paths.py               运行形态路径解析（源码运行 / 打包后）
 │  ├─ model_paths.py         模型路径解析（非 ASCII 路径自动镜像）
 │  ├─ templates/index.html   前端页面（单文件，内联 CSS/JS，零构建、无外链）
 │  └─ run.py                 启动入口（自动开浏览器）
 ├─ models/                   人脸模型 + 第三方许可证（见 models/README.md）
 ├─ data/faces.db             用户、人脸模板、审计（自动生成，不入库）
-├─ tools/                    验证、诊断与模型下载脚本
+├─ tools/                    验证、诊断、模型下载与打包脚本
+├─ dist/FaceLogin/           打包产物（自动生成，不入库）
 └─ .venv/                    Python 运行环境（自动生成，不入库）
 ```
 
-> `data/` 与 `.venv/` 都在 `.gitignore` 里：前者含口令哈希与生物特征，
-> 后者体积上百 MB 且夹带本机绝对路径，都不该进版本库。
+> `data/`、`dist/`、`build/` 与 `.venv/` 都在 `.gitignore` 里：前者含口令哈希与
+> 生物特征；`dist/`、`build/` 是可由源码重建的构建产物；`.venv/` 体积上百 MB
+> 且夹带本机绝对路径。都不该进版本库。
 
 ## 运行依赖
 
@@ -216,6 +221,53 @@ python -m venv .venv
 ```
 
 模型已随仓库提供，**不需要额外下载**；若确实缺失，运行 `python tools\download_models.py`。
+
+### 打包成 exe（免安装，给没装 Python 的人用）
+
+双击项目根的 `打包.bat`（或执行 `.venv\Scripts\python.exe tools\build_exe.py`），
+约 20 秒后得到 `dist\FaceLogin\` 文件夹。直接双击里面的 `FaceLogin.exe` 即可运行 ——
+**目标电脑不需要装 Python，也不需要装任何依赖**。
+
+```
+dist\FaceLogin\
+├─ FaceLogin.exe     双击启动（无控制台窗口）
+├─ models/           人脸模型（放在 exe 旁边，可自行替换）
+├─ data/             首次运行后自动生成，存 faces.db
+├─ launch_log.txt    首次运行后自动生成，排查问题看这个
+└─ _internal/        Python 运行时与第三方依赖，不要手动改
+```
+
+分发时把**整个 `dist\FaceLogin` 文件夹**压缩发出去即可。两个注意点：
+
+- `models/` 必须跟着走 —— 它刻意不打进 exe 内部，这样模型可替换，
+  也不会让每次启动都解压一遍上百 MB 的内容。
+- `data/` 是使用者自己的账号与人脸特征，**不要把自己的 `data/` 一起发出去**。
+
+打包参数：
+
+| 参数 | 作用 |
+|---|---|
+| 无 | 默认，无控制台窗口 |
+| `--console` | 保留控制台窗口，排查启动问题时用 |
+| `--slim` | 额外删掉 OpenCV 的 ffmpeg 视频解码后端，省约 30 MB |
+
+#### 为什么是 173 MB
+
+打包后约 **173 MB**（未裁剪约 203 MB）。体积几乎**不来自 Flask，也不来自本项目代码**：
+
+| 部分 | 大小 | 能否省 |
+|---|---|---|
+| `cv2.pyd`（OpenCV 单体模块） | 82 MB | ❌ 人脸检测/识别的地基，官方 wheel 无法拆分 |
+| `models/`（人脸模型） | 37 MB | ❌ 必需 |
+| numpy 的 OpenBLAS 数值库 | 20 MB | ❌ 矩阵运算必需 |
+| libcrypto / libssl | 9 MB | ❌ 标准库 `ssl` 依赖，Werkzeug 会 import |
+| Python 运行时 + Flask 等 | 约 15 MB | ❌ |
+| OpenCV 的 ffmpeg 后端 | 30 MB | ✅ `--slim` 可删 |
+
+本项目自己的代码不到 100 KB。**体积基本是 OpenCV 这条技术路线的固有成本** ——
+想显著变小只能换人脸识别的实现方式，那会牺牲「零额外模型、离线可跑」这些特性。
+
+> 打包产物在 `dist/`、`build/` 中，已被 `.gitignore` 排除，不会进版本库。
 
 ## 人脸模型
 

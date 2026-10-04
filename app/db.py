@@ -11,8 +11,12 @@ import secrets
 import sqlite3
 import time
 
+import paths
+
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_DIR = os.path.dirname(APP_DIR)
+# 打包成 exe 后 __file__ 会指向解压目录，所以程序根统一交给 paths 判断：
+# 源码运行 = 项目根，打包运行 = exe 所在目录（数据跟着用户走，不会写进临时目录）。
+PROJECT_DIR = paths.app_root()
 DATA_DIR = os.environ.get("FACELOGIN_DATA", os.path.join(PROJECT_DIR, "data"))
 DB_PATH = os.path.join(DATA_DIR, "faces.db")
 

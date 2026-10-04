@@ -13,6 +13,7 @@ from flask import Flask, Response, jsonify, request, session
 
 import db
 import liveness
+import paths
 import security
 from face import FaceEngine, pack, unpack
 from model_paths import MODELS_DIR
@@ -562,9 +563,9 @@ def api_threshold():
 
 # ---------------------------------------------------------------- page
 
-TEMPLATE_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "templates", "index.html"
-)
+# 模板是只读资源：源码运行时在 app/templates/，打包后由 --add-data 放到
+# PyInstaller 的解压目录里 —— 必须用 paths.resource_path() 取，不能用程序根。
+TEMPLATE_PATH = paths.resource_path("templates", "index.html")
 
 
 def render_page():

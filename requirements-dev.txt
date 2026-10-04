@@ -1,0 +1,11 @@
+# 仅「开发/打包」才需要的依赖；程序运行本身不需要这些。
+#
+#     pip install -r requirements-dev.txt
+#
+# 只想把程序跑起来的话，装 requirements.txt 就够了。
+# PyInstaller 是纯 Python 包，体积很小，不会污染运行环境。
+
+-r requirements.txt
+
+# 打包成免安装的 Windows 文件夹，见 tools/build_exe.py 与项目根的「打包.bat」
+pyinstaller==6.22.3

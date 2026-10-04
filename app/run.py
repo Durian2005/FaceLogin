@@ -13,32 +13,41 @@ import time
 import webbrowser
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_DIR = os.path.dirname(BASE_DIR)
-LOG_PATH = os.path.join(PROJECT_DIR, "launch_log.txt")
-
 sys.path.insert(0, BASE_DIR)
+
+import paths  # noqa: E402
+
+# 日志落在程序根（源码运行 = 项目根，打包运行 = exe 所在目录），
+# 这样打包后用户能在 exe 旁边直接看到 launch_log.txt。
+PROJECT_DIR = paths.app_root()
+LOG_PATH = os.path.join(PROJECT_DIR, "launch_log.txt")
 
 URL = "http://127.0.0.1:5000/"
 
 
 def _ensure_streams():
-    """pythonw.exe gives us None streams; point them at a log file instead."""
-    needs_redirect = sys.stdout is None or sys.stderr is None
-    if needs_redirect:
-        try:
-            log = open(LOG_PATH, "a", encoding="utf-8", errors="replace")
-        except Exception:
-            log = io.StringIO()
-        if sys.stdout is None:
-            sys.stdout = log
-        if sys.stderr is None:
-            sys.stderr = log
-    else:
+    """No console means every print() would vanish -- point the streams at a log file.
+
+    两种「没有控制台」的情况都要处理，它们表现不一样：
+    - pythonw.exe（源码运行）：sys.stdout / sys.stderr 直接是 None —— 好判断。
+    - PyInstaller 的 --noconsole 产物：流**不是** None，但没有真实控制台依附，
+      print 的去向不可靠 —— 实测 launch_log.txt 根本不会生成。
+      这一种只能靠 GetConsoleWindow() 判断，是打包之后才暴露出来的问题。
+    """
+    if _has_console():
         try:
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
             sys.stderr.reconfigure(encoding="utf-8", errors="replace")
         except Exception:
             pass
+        return
+
+    try:
+        log = open(LOG_PATH, "a", encoding="utf-8", errors="replace")
+    except Exception:
+        log = io.StringIO()
+    sys.stdout = log
+    sys.stderr = log
 
 
 def _pause_if_possible(msg="Press Enter to exit..."):

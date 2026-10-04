@@ -21,13 +21,17 @@ import os
 import shutil
 import tempfile
 
+import paths
+
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_DIR = os.path.dirname(APP_DIR)
+# 打包成 exe 后 __file__ 指向解压目录，所以程序根交给 paths 判断：
+# 源码运行 = 项目根，打包运行 = exe 所在目录（模型放在 exe 旁边，用户可替换）。
+PROJECT_DIR = paths.app_root()
 
 DETECTOR_NAME = "face_detection_yunet_2023mar.onnx"
 RECOGNIZER_NAME = "face_recognition_sface_2021dec.onnx"
 
-#: 模型所在目录。默认 = 仓库根目录下的 models/，除非环境变量指定。
+#: 模型所在目录。默认 = 程序根下的 models/，除非环境变量指定。
 MODELS_DIR = os.environ.get("FACELOGIN_MODELS") or os.path.join(PROJECT_DIR, "models")
 
 _cache_resolved = False
