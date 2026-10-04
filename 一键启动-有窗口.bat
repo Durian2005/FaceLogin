@@ -1,4 +1,4 @@
-﻿@echo off
+@echo off
 setlocal
 cd /d "%~dp0"
 
@@ -11,7 +11,7 @@ set "FACELOGIN_MODELS=%~dp0models"
 
 if not exist "%RUNNER%" (
   echo [ERROR] runner not found: %RUNNER% >> "%LOG%"
-  echo [错误] 找不到 app\run.py >> "%LOG%"
+  echo [ERROR] expected file: %RUNNER% >> "%LOG%"
   type "%LOG%"
   pause
   exit /b 1
@@ -19,7 +19,7 @@ if not exist "%RUNNER%" (
 
 if not exist "%FACELOGIN_MODELS%\face_detection_yunet_2023mar.onnx" (
   echo [ERROR] model not found in %FACELOGIN_MODELS% >> "%LOG%"
-  echo [错误] 找不到人脸模型 >> "%LOG%"
+  echo [ERROR] expected file: %FACELOGIN_MODELS%\face_detection_yunet_2023mar.onnx >> "%LOG%"
   type "%LOG%"
   pause
   exit /b 1
