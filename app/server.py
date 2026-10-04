@@ -2,6 +2,7 @@
 
 import os
 import re
+import secrets
 import threading
 import time
 from datetime import datetime
@@ -11,6 +12,7 @@ import numpy as np
 from flask import Flask, Response, jsonify, request, session
 
 import db
+import liveness
 import security
 from face import FaceEngine, pack, unpack
 from model_paths import MODELS_DIR
@@ -54,6 +56,9 @@ def _env_flag(name, default=True):
 
 
 AUTO_EXIT = _env_flag("FACELOGIN_AUTO_EXIT", True)
+# 人脸登录是否要求通过随机动作挑战。默认开启；关闭后登录退化为「直接比对一次」，
+# 便于无人值守的自测。**关闭即等于放弃反照片欺骗能力**，README 里已写明。
+LIVENESS_ENABLED = _env_flag("FACELOGIN_LIVENESS", True)
 try:
     EXIT_GRACE = float(os.environ.get("FACELOGIN_EXIT_GRACE", "5"))
 except ValueError:
@@ -198,6 +203,7 @@ def api_state():
         "det_score": last_state["score"],
         "threshold": THRESHOLD["value"],
         "password_backend": security.hash_backend(),
+        "liveness": LIVENESS_ENABLED,
         "logged_in": user is not None,
         "username": user["username"] if user else None,
         "face_samples": db.count_templates(user["id"]) if user else 0,
@@ -284,29 +290,90 @@ def api_login_password():
                     "message": "用户名或密码不正确，还可尝试 %d 次" % left})
 
 
+def _face_login_guard(username):
+    """人脸登录的公共前置检查：锁定状态、账号是否存在、是否已录入人脸。
+
+    返回 (user, stored, 错误响应)。错误响应非 None 时直接原样返回给客户端。
+    抽出来是为了让「直接人脸登录」和「活体挑战后人脸登录」走完全相同的判定。
+    """
+    user = db.get_user(username)
+    remaining = lock_remaining(user)
+    if remaining > 0:
+        db.add_event(username, "face", False, detail="locked")
+        return None, None, jsonify({"ok": False, "error": "locked", "retry_after": remaining,
+                                    "message": "账号已临时锁定，请 %d 秒后再试" % remaining})
+
+    if user is None:
+        db.add_event(username, "face", False, detail="unknown_user")
+        return None, None, jsonify({"ok": False, "error": "auth_failed",
+                                    "message": "用户名或人脸不匹配"})
+
+    stored = db.templates(user["id"])
+    if not stored:
+        db.add_event(username, "face", False, detail="no_template")
+        return None, None, jsonify({"ok": False, "error": "no_template",
+                                    "message": "该账号还没有录入人脸，请先登录后录入"})
+    return user, stored, None
+
+
+def _match_and_login(user, stored, feat, ms, extra=None):
+    """特征与模板比对，按结果决定登录或累计失败次数。"""
+    refs = [unpack(blob, dim) for blob, dim in stored]
+    refs = [r for r in refs if r is not None]
+    score = engine.best_cosine(refs, feat)
+    extra = extra or {}
+
+    if score >= THRESHOLD["value"]:
+        db.set_last_login(user["id"])
+        db.add_event(user["username"], "face", True, similarity=round(score, 4), detail="ok")
+        start_session(user)
+        body = {"ok": True, "username": user["username"], "cosine": round(score, 4),
+                "threshold": THRESHOLD["value"], "ms": ms, "message": "人脸验证通过"}
+        body.update(extra)
+        return jsonify(body)
+
+    failed, locked_until = db.bump_failure(user["id"], security.MAX_FAILS,
+                                           security.LOCK_SECONDS)
+    db.add_event(user["username"], "face", False, similarity=round(score, 4),
+                 detail="below_threshold_%d" % failed)
+    if locked_until > time.time():
+        db.add_event(user["username"], "lockout", False,
+                     detail="locked_%ds" % security.LOCK_SECONDS)
+        body = {"ok": False, "error": "locked", "retry_after": security.LOCK_SECONDS,
+                "cosine": round(score, 4), "threshold": THRESHOLD["value"], "ms": ms,
+                "message": "连续失败 %d 次，账号锁定 %d 秒"
+                           % (security.MAX_FAILS, security.LOCK_SECONDS)}
+        body.update(extra)
+        return jsonify(body)
+
+    body = {"ok": False, "error": "auth_failed", "cosine": round(score, 4),
+            "threshold": THRESHOLD["value"], "ms": ms, "failed": failed,
+            "message": "人脸相似度 %.4f 低于阈值 %.2f" % (score, THRESHOLD["value"])}
+    body.update(extra)
+    return jsonify(body)
+
+
 @app.route("/api/login/face", methods=["POST"])
 def api_login_face():
+    """直接人脸登录（不带动作挑战）。
+
+    活体检测开启时这个入口会被拒绝：否则随机动作挑战形同虚设 ——
+    攻击者绕过前端、直接打这个接口就能跳过挑战。要做免挑战的自动化自测，
+    需显式设置 FACELOGIN_LIVENESS=0，并在 README 里如实说明这是降级状态。
+    """
     data = request.get_json(silent=True) or {}
     username = (data.get("username") or "").strip()
     if not username:
         return jsonify({"ok": False, "error": "missing_field", "message": "请填写用户名"})
 
-    user = db.get_user(username)
-    remaining = lock_remaining(user)
-    if remaining > 0:
-        db.add_event(username, "face", False, detail="locked")
-        return jsonify({"ok": False, "error": "locked", "retry_after": remaining,
-                        "message": "账号已临时锁定，请 %d 秒后再试" % remaining})
+    if LIVENESS_ENABLED:
+        db.add_event(username, "face", False, detail="liveness_required")
+        return jsonify({"ok": False, "error": "liveness_required",
+                        "message": "已开启活体检测，请点击「人脸登录」完成动作挑战"})
 
-    if user is None:
-        db.add_event(username, "face", False, detail="unknown_user")
-        return jsonify({"ok": False, "error": "auth_failed", "message": "用户名或人脸不匹配"})
-
-    stored = db.templates(user["id"])
-    if not stored:
-        db.add_event(username, "face", False, detail="no_template")
-        return jsonify({"ok": False, "error": "no_template",
-                        "message": "该账号还没有录入人脸，请先登录后录入"})
+    user, stored, err = _face_login_guard(username)
+    if err:
+        return err
 
     feat, status, ms = engine.capture_feature()
     if feat is None:
@@ -314,33 +381,86 @@ def api_login_face():
         return jsonify({"ok": False, "error": status,
                         "message": "没有检测到人脸，请正对摄像头再试"})
 
-    refs = [unpack(blob, dim) for blob, dim in stored]
-    refs = [r for r in refs if r is not None]
-    score = engine.best_cosine(refs, feat)
-    passed = score >= THRESHOLD["value"]
+    return _match_and_login(user, stored, feat, ms)
 
-    if passed:
-        db.set_last_login(user["id"])
-        db.add_event(username, "face", True, similarity=round(score, 4), detail="ok")
-        start_session(user)
-        return jsonify({"ok": True, "username": user["username"], "cosine": round(score, 4),
-                        "threshold": THRESHOLD["value"], "ms": ms,
-                        "message": "人脸验证通过"})
 
-    failed, locked_until = db.bump_failure(user["id"], security.MAX_FAILS,
-                                           security.LOCK_SECONDS)
-    db.add_event(username, "face", False, similarity=round(score, 4),
-                 detail="below_threshold_%d" % failed)
-    if locked_until > time.time():
-        db.add_event(username, "lockout", False, detail="locked_%ds" % security.LOCK_SECONDS)
-        return jsonify({"ok": False, "error": "locked", "retry_after": security.LOCK_SECONDS,
-                        "cosine": round(score, 4), "threshold": THRESHOLD["value"], "ms": ms,
-                        "message": "连续失败 %d 次，账号锁定 %d 秒"
-                                   % (security.MAX_FAILS, security.LOCK_SECONDS)})
-    return jsonify({"ok": False, "error": "auth_failed", "cosine": round(score, 4),
-                    "threshold": THRESHOLD["value"], "ms": ms, "failed": failed,
-                    "message": "人脸相似度 %.4f 低于阈值 %.2f"
-                               % (score, THRESHOLD["value"])})
+# ---------------------------------------------------------------- liveness
+
+LIVENESS_ERROR_TEXT = {
+    "no_face_detected": "挑战过程中没有检测到人脸，请正对摄像头再试",
+    "camera_read_failed": "读取摄像头失败，请检查摄像头是否被其他程序占用",
+    "face_changed": "画面中的人脸位置发生突变，动作挑战未通过",
+    "liveness_timeout": "没有检测到指定动作，请照着提示转动头部再试",
+    "action_not_returned": "动作已识别，但没取到正面画面 —— 做完动作后请转回正对摄像头",
+    "not_enough_samples": "采样帧数不足，请保持人脸在画面中再试",
+}
+
+
+@app.route("/api/liveness/start", methods=["POST"])
+def api_liveness_start():
+    """生成一次性随机动作挑战。动作只随机、不保密：用户得知道要做什么。"""
+    if not LIVENESS_ENABLED:
+        return jsonify({"ok": False, "error": "liveness_disabled",
+                        "message": "活体检测已关闭"})
+
+    sid = session.get("live_sid")
+    if not sid:
+        sid = secrets.token_urlsafe(12)
+        session["live_sid"] = sid          # 挑战绑定到当前浏览器会话
+    token, action = liveness.new_challenge(sid)
+    return jsonify({"ok": True, "challenge_id": token, "action": action,
+                    "action_text": liveness.ACTION_TEXT[action],
+                    "hint": liveness.ACTION_HINT,
+                    "timeout": liveness.MAX_SECONDS})
+
+
+@app.route("/api/liveness/verify", methods=["POST"])
+def api_liveness_verify():
+    """执行动作挑战并完成人脸 1:1 比对。
+
+    注意这里用的是挑战过程中采到的那一帧特征，不是重新抓一帧 ——
+    否则「通过动作验证的脸」和「用于比对的脸」可能不是同一个人。
+    """
+    data = request.get_json(silent=True) or {}
+    username = (data.get("username") or "").strip()
+    token = (data.get("challenge_id") or "").strip()
+    if not username or not token:
+        return jsonify({"ok": False, "error": "missing_field",
+                        "message": "缺少用户名或挑战标识"})
+
+    user, stored, err = _face_login_guard(username)
+    if err:
+        return err
+
+    item, why = liveness.consume(token, session.get("live_sid"))
+    if item is None:
+        db.add_event(username, "liveness", False, detail=why)
+        return jsonify({"ok": False, "error": why,
+                        "message": "挑战已失效，请重新点击「人脸登录」"})
+
+    action = item["action"]
+    result = liveness.run_challenge(engine, action)
+    diag = result["diag"]
+    info = {"action": action, "action_text": liveness.ACTION_TEXT[action],
+            "elapsed": diag["elapsed"]}
+
+    if not result["passed"]:
+        # 动作没做出来 ≠ 身份验证失败，所以**不累计失败次数**（否则动作不熟练的
+        # 用户会被锁号）。只有真正跑到特征比对且不通过时才计数。重试活体挑战
+        # 对攻击者没有帮助，不会因此削弱防护。
+        db.add_event(username, "liveness", False,
+                     detail="%s_%s" % (action, result["error"]))
+        info["diag"] = liveness.diag_text(diag)
+        return jsonify({"ok": False, "error": result["error"], "liveness": info,
+                        "message": LIVENESS_ERROR_TEXT.get(
+                            result["error"], "动作挑战未通过，请重试")})
+
+    db.add_event(username, "liveness", True,
+                 detail="action_%s | %s" % (action, liveness.diag_text(diag)))
+    info["passed"] = True
+    return _match_and_login(user, stored, result["feature"],
+                            round(diag["elapsed"] * 1000, 1),
+                            extra={"liveness": info})
 
 
 @app.route("/api/logout", methods=["POST"])
@@ -477,5 +597,6 @@ if __name__ == "__main__":
     print("THRESHOLD", THRESHOLD["value"])
     print("PASSWORD_BACKEND", security.hash_backend())
     print("CAMERA_OPEN", engine.camera_ready())
+    print("LIVENESS", LIVENESS_ENABLED)
     print("MODELS_DIR", MODELS_DIR)
     app.run(host="127.0.0.1", port=5000, threaded=True)

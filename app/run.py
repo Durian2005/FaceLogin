@@ -120,6 +120,8 @@ def main():
     print("  Face Login System is running")
     print("  URL: " + URL)
     print("  Close this window to stop the service")
+    print("  Liveness check: " + ("ON (random action challenge)"
+                                 if server.LIVENESS_ENABLED else "OFF"))
     print("=" * 46)
     sys.stdout.flush()
 

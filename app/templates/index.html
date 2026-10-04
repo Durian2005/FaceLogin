@@ -112,6 +112,22 @@ h1{font-size:19px;letter-spacing:.01em}
 .cam-tag.hit{color:#a7f3d0;border-color:rgba(52,211,153,.4)}
 .cam-tag.hit i{background:var(--ok);animation:beat 1.6s ease-in-out infinite}
 
+/* ---------------- 活体挑战浮层（叠在画面底部）---------------- */
+.live{
+  position:absolute;left:0;right:0;bottom:0;
+  padding:12px 14px 13px;
+  display:flex;flex-direction:column;gap:7px;
+  background:linear-gradient(180deg,rgba(6,10,14,0),rgba(6,10,14,.92) 42%);
+  border-top:1px solid rgba(56,189,248,.3);
+  animation:toast-in .2s ease both;
+}
+.live[hidden]{display:none}
+.live b{font-size:14px;font-weight:600;color:#bae6fd;letter-spacing:.01em}
+.live .lsub{font-size:11.5px;color:var(--tx-2)}
+.live .lbar{height:4px;border-radius:999px;background:rgba(255,255,255,.13);overflow:hidden}
+.live .lbar i{display:block;height:100%;width:0;border-radius:999px;
+  background:linear-gradient(90deg,var(--accent),var(--accent-2))}
+
 /* ---------------- 指标 ---------------- */
 .metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:10px;margin-top:14px}
 .metric{border:1px solid var(--border);border-radius:11px;padding:9px 11px;background:rgba(255,255,255,.028)}
@@ -242,11 +258,17 @@ td.empty{text-align:center;color:var(--tx-3);padding:18px 9px;white-space:normal
       <div class="cam">
         <img src="/api/stream" alt="摄像头实时画面">
         <span class="cam-tag" id="camtag"><i></i><span id="camtag-tx">检测中</span></span>
+        <div class="live" id="live" hidden>
+          <b id="live-tx">动作挑战</b>
+          <span class="lsub" id="live-sub">请按提示完成动作</span>
+          <div class="lbar"><i id="live-bar"></i></div>
+        </div>
       </div>
       <div class="metrics">
         <div class="metric"><span>检测结果</span><b id="det">-</b></div>
         <div class="metric"><span>相似度阈值</span><b id="thr">-</b></div>
         <div class="metric"><span>口令哈希</span><b id="pwd">-</b></div>
+        <div class="metric"><span>活体检测</span><b id="livemode">-</b></div>
       </div>
     </section>
 
@@ -286,7 +308,7 @@ td.empty{text-align:center;color:var(--tx-3);padding:18px 9px;white-space:normal
         <button class="btn btn-primary" onclick="loginFace()">人脸登录</button>
         <button class="btn" onclick="loginPassword()">密码登录</button>
       </div>
-      <p class="hint">人脸登录为「账号先行 + 1:1 比对」，只与本人模板比对，无需遍历所有用户；密码登录可随时回退。</p>
+      <p class="hint">人脸登录为「账号先行 + 1:1 比对」，只与本人模板比对，无需遍历所有用户。登录时需按提示完成一次随机动作挑战 —— 这条能挡住静态照片和事先录好的视频，但挡不住实时配合旋转的照片或屏幕回放。密码登录可随时回退。</p>
     </section>
 
     <section class="card">
@@ -387,13 +409,56 @@ function loginPassword(){ guard(async () => {
   if (r.ok) $('lp').value = '';
 }); }
 
-function loginFace(){ guard(async () => {
-  toast('正在验证，请正对摄像头…');
-  const r = await post('/api/login/face', {username: $('lu').value.trim()});
+/* ---------------- 活体动作挑战浮层 ---------------- */
+let liveTimer = null;
+function showLive(actionText, hint, timeout){
+  $('live-tx').textContent = actionText;
+  $('live-sub').textContent = hint || '请按提示完成动作';
+  $('live-bar').style.width = '0%';
+  $('live').hidden = false;
+  const t0 = Date.now();
+  const total = Math.max(1, timeout || 8) * 1000;
+  clearInterval(liveTimer);
+  liveTimer = setInterval(() => {
+    $('live-bar').style.width = Math.min(100, (Date.now() - t0) / total * 100) + '%';
+  }, 80);
+}
+function hideLive(){
+  clearInterval(liveTimer); liveTimer = null;
+  $('live').hidden = true;
+  $('live-bar').style.width = '0%';
+}
+/* 人脸登录的返回文案（两条链路共用：动作挑战后比对 / 关闭活体时直接比对） */
+function faceResultText(r){
   const extra = r.cosine !== undefined
-    ? '（相似度 ' + r.cosine + ' / 阈值 ' + r.threshold + '，' + (r.ms || 0) + 'ms）'
+    ? '（相似度 ' + r.cosine + ' / 阈值 ' + r.threshold + '，' + Math.round(r.ms || 0) + 'ms）'
     : '';
-  toast((r.message || r.error) + extra, toneOf(r));
+  return (r.message || r.error) + extra;
+}
+
+function loginFace(){ guard(async () => {
+  const username = $('lu').value.trim();
+  if (!username){ toast('请先填写用户名', 'warn'); return; }
+
+  toast('正在准备动作挑战…');
+  const s = await post('/api/liveness/start', {});
+
+  if (!s.ok && s.error === 'liveness_disabled'){
+    // 服务端关掉了活体检测：退回直接比对，保持可用
+    const r = await post('/api/login/face', {username});
+    toast(faceResultText(r), toneOf(r));
+    return;
+  }
+  if (!s.ok){ toast(s.message || s.error, 'bad'); return; }
+
+  showLive(s.action_text, s.hint, s.timeout);
+  let r;
+  try {
+    r = await post('/api/liveness/verify', {challenge_id: s.challenge_id, username});
+  } finally {
+    hideLive();
+  }
+  toast(faceResultText(r), toneOf(r));
 }); }
 
 function enroll(){ guard(async () => {
@@ -433,6 +498,9 @@ async function refresh(){
     $('thr').textContent = s.threshold;
     $('badge-thr').textContent = '当前 ' + s.threshold;
     $('pwd').textContent = s.password_backend;
+
+    $('livemode').textContent = s.liveness ? '动作挑战' : '已关闭';
+    $('livemode').style.color = s.liveness ? '#a7f3d0' : '#fcd34d';
 
     $('who').textContent = s.logged_in ? s.username : '未登录';
     $('samples').textContent = s.face_samples + ' 组';
