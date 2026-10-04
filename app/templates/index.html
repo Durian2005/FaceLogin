@@ -1,0 +1,469 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>本地人脸识别登录</title>
+<style>
+/* ============================================================
+   单文件模板：全部样式内联，不依赖任何 CDN 或构建工具
+   —— 保证离线可用、clone 下来双击即可运行
+   ============================================================ */
+:root{
+  --bg:#0a0d12;
+  --surface:rgba(255,255,255,.035);
+  --surface-2:rgba(255,255,255,.06);
+  --border:rgba(255,255,255,.09);
+  --border-2:rgba(255,255,255,.17);
+  --tx:#e8eef6;
+  --tx-2:#9aa7b6;
+  --tx-3:#6b7787;
+  --accent:#38bdf8;
+  --accent-2:#818cf8;
+  --ok:#34d399;
+  --warn:#fbbf24;
+  --bad:#f87171;
+  --r:16px;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;
+  padding:22px clamp(14px,3vw,34px) 40px;
+  background:var(--bg);
+  background-image:
+    radial-gradient(1100px 560px at 10% -12%, rgba(56,189,248,.11), transparent 62%),
+    radial-gradient(900px 520px at 102% -6%, rgba(129,140,248,.10), transparent 58%);
+  background-attachment:fixed;
+  color:var(--tx);
+  font-family:system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+  font-size:14px;
+  line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2{margin:0;font-weight:600}
+
+/* ---------------- 顶栏 ---------------- */
+.topbar{
+  display:flex;align-items:flex-start;justify-content:space-between;
+  gap:18px;flex-wrap:wrap;margin-bottom:20px;
+}
+.brand{display:flex;align-items:center;gap:13px}
+.logo{
+  width:42px;height:42px;flex:none;border-radius:12px;
+  display:grid;place-items:center;
+  background:linear-gradient(140deg,rgba(56,189,248,.9),rgba(129,140,248,.9));
+  box-shadow:0 10px 26px -12px rgba(56,189,248,.75);
+}
+.logo svg{width:22px;height:22px;display:block}
+h1{font-size:19px;letter-spacing:.01em}
+.sub{margin:4px 0 0;font-size:12px;color:var(--tx-3)}
+.topbar-side{display:flex;align-items:center;gap:9px;flex-wrap:wrap;padding-top:5px}
+.chip{
+  display:inline-flex;align-items:center;gap:6px;
+  font-size:11px;color:var(--tx-2);
+  padding:5px 11px;border-radius:999px;
+  border:1px solid var(--border);background:var(--surface);
+  white-space:nowrap;
+}
+.chip i{width:6px;height:6px;border-radius:50%;background:var(--ok);flex:none}
+.chip.exit{color:#fcd34d;border-color:rgba(251,191,36,.32);background:rgba(251,191,36,.08)}
+.chip.exit i{background:var(--warn);animation:beat 2.4s ease-in-out infinite}
+@keyframes beat{0%,100%{opacity:1}50%{opacity:.3}}
+
+/* ---------------- 布局 ---------------- */
+.grid{
+  display:grid;
+  grid-template-columns:minmax(0,1.28fr) minmax(0,1fr);
+  gap:16px;align-items:start;
+}
+.col{display:flex;flex-direction:column;gap:16px;min-width:0}
+@media (max-width:940px){ .grid{grid-template-columns:1fr} }
+
+/* ---------------- 卡片 ---------------- */
+.card{
+  border:1px solid var(--border);
+  border-radius:var(--r);
+  padding:16px 18px;
+  background:linear-gradient(180deg,rgba(255,255,255,.052),rgba(255,255,255,.02));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.045), 0 16px 34px -24px rgba(0,0,0,.95);
+  transition:border-color .2s,transform .2s,box-shadow .2s;
+}
+.card:hover{
+  border-color:var(--border-2);
+  transform:translateY(-1px);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.06), 0 20px 40px -24px rgba(0,0,0,1);
+}
+.card-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:13px}
+.card h2{font-size:13.5px;color:#dbe5ef;letter-spacing:.01em}
+
+/* ---------------- 摄像头 ---------------- */
+.cam{position:relative;border-radius:12px;overflow:hidden;background:#04070a;border:1px solid var(--border);min-height:220px}
+.cam img{width:100%;display:block}
+.cam-tag{
+  position:absolute;left:10px;top:10px;
+  display:inline-flex;align-items:center;gap:6px;
+  font-size:11px;padding:4px 9px;border-radius:999px;
+  background:rgba(6,10,14,.72);border:1px solid var(--border);
+  color:var(--tx-2);backdrop-filter:blur(6px);
+}
+.cam-tag i{width:6px;height:6px;border-radius:50%;background:var(--tx-3);flex:none}
+.cam-tag.hit{color:#a7f3d0;border-color:rgba(52,211,153,.4)}
+.cam-tag.hit i{background:var(--ok);animation:beat 1.6s ease-in-out infinite}
+
+/* ---------------- 指标 ---------------- */
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:10px;margin-top:14px}
+.metric{border:1px solid var(--border);border-radius:11px;padding:9px 11px;background:rgba(255,255,255,.028)}
+.metric span{display:block;font-size:11px;color:var(--tx-3);letter-spacing:.02em}
+.metric b{display:block;margin-top:3px;font-size:14px;font-weight:600;font-variant-numeric:tabular-nums}
+.metric.mt-lg b{font-size:15px}
+
+/* ---------------- 徽章 ---------------- */
+.badge{
+  font-size:11px;padding:3px 10px;border-radius:999px;flex:none;
+  border:1px solid var(--border-2);color:var(--tx-2);background:var(--surface);
+}
+.badge.on{color:#a7f3d0;border-color:rgba(52,211,153,.42);background:rgba(52,211,153,.1)}
+
+/* ---------------- 表单 ---------------- */
+label{display:block;font-size:12px;color:var(--tx-2);margin:11px 0 5px}
+input{
+  width:100%;padding:9px 11px;border-radius:10px;font-size:13px;
+  border:1px solid var(--border);background:rgba(0,0,0,.3);color:var(--tx);
+  font-family:inherit;
+  transition:border-color .18s,box-shadow .18s,background .18s;
+}
+input::placeholder{color:var(--tx-3)}
+input:focus{
+  outline:none;background:rgba(0,0,0,.42);
+  border-color:rgba(56,189,248,.6);
+  box-shadow:0 0 0 3px rgba(56,189,248,.13);
+}
+input[type=number]{font-variant-numeric:tabular-nums}
+
+/* ---------------- 按钮 ---------------- */
+.btn{
+  appearance:none;font-family:inherit;font-size:13px;font-weight:500;
+  padding:9px 15px;border-radius:10px;cursor:pointer;
+  color:var(--tx);border:1px solid var(--border-2);background:rgba(255,255,255,.055);
+  transition:background .18s,border-color .18s,transform .1s,filter .18s;
+}
+.btn:hover{background:rgba(255,255,255,.105)}
+.btn:active{transform:translateY(1px)}
+.btn:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(56,189,248,.22)}
+.btn-primary{
+  border-color:transparent;color:#06121b;font-weight:600;
+  background:linear-gradient(135deg,var(--accent),var(--accent-2));
+  box-shadow:0 10px 24px -14px rgba(56,189,248,.9);
+}
+.btn-primary:hover{filter:brightness(1.09);background:linear-gradient(135deg,var(--accent),var(--accent-2))}
+.btn-sm{padding:6px 11px;font-size:12px}
+.btn-danger{border-color:rgba(248,113,113,.34);color:#fecaca;background:rgba(248,113,113,.075)}
+.btn-danger:hover{background:rgba(248,113,113,.16)}
+.actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:14px}
+body.busy .btn{pointer-events:none;opacity:.6}
+
+/* ---------------- 提示文字 ---------------- */
+.hint{font-size:12px;color:var(--tx-3);line-height:1.65;margin:11px 0 0}
+
+/* ---------------- 危险操作折叠 ---------------- */
+.danger{margin-top:14px;border:1px solid rgba(248,113,113,.2);border-radius:12px;background:rgba(248,113,113,.045);padding:0 13px}
+.danger summary{
+  cursor:pointer;list-style:none;padding:10px 0;
+  font-size:12px;color:#fca5a5;display:flex;align-items:center;gap:7px;
+}
+.danger summary::-webkit-details-marker{display:none}
+.danger summary::after{content:"";margin-left:auto;border:4px solid transparent;border-top-color:#fca5a5;transform:translateY(2px);transition:transform .2s}
+.danger[open] summary::after{transform:rotate(180deg) translateY(-1px)}
+.danger[open]{padding-bottom:13px}
+.danger .hint{margin-top:0}
+
+/* ---------------- 表格 ---------------- */
+.table-wrap{overflow:auto;max-height:290px;margin:0 -4px;padding:0 4px}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th,td{text-align:left;padding:7px 9px;border-bottom:1px solid rgba(255,255,255,.055);white-space:nowrap}
+th{color:var(--tx-3);font-weight:500;font-size:11px;letter-spacing:.03em;position:sticky;top:0;background:#0d1117}
+td{color:var(--tx-2)}
+tbody tr:last-child td{border-bottom:none}
+tbody tr:hover td{background:rgba(255,255,255,.022);color:var(--tx)}
+td.y{color:var(--ok)}
+td.n{color:var(--bad)}
+td.empty{text-align:center;color:var(--tx-3);padding:18px 9px;white-space:normal}
+
+/* ---------------- 结果提示（右下角浮层）---------------- */
+.toasts{
+  position:fixed;right:18px;bottom:18px;z-index:60;
+  display:flex;flex-direction:column;gap:9px;
+  width:min(400px,calc(100vw - 36px));
+}
+.toast{
+  padding:12px 14px;border-radius:12px;font-size:13px;line-height:1.55;
+  border:1px solid var(--border-2);
+  background:rgba(15,19,26,.94);backdrop-filter:blur(10px);
+  color:var(--tx);box-shadow:0 22px 44px -24px #000;
+  animation:toast-in .22s ease both;
+}
+.toast.ok{border-color:rgba(52,211,153,.45)}
+.toast.bad{border-color:rgba(248,113,113,.45)}
+.toast.warn{border-color:rgba(251,191,36,.45)}
+@keyframes toast-in{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="logo" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#06121b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 3l7.5 3.6v5.2c0 4.4-3 8.1-7.5 9.2-4.5-1.1-7.5-4.8-7.5-9.2V6.6z"/>
+        <circle cx="12" cy="11" r="2.1"/>
+        <path d="M8.6 16.2c.7-1.5 1.9-2.3 3.4-2.3s2.7.8 3.4 2.3"/>
+      </svg>
+    </div>
+    <div>
+      <h1>本地人脸识别登录</h1>
+      <p class="sub">离线运行 · 模板存 SQLite · 口令 Argon2id 哈希 · 失败 3 次锁定 3 分钟</p>
+    </div>
+  </div>
+  <div class="topbar-side">
+    <span class="chip"><i></i>本机回环 127.0.0.1:5000 · 数据不出本机</span>
+    <!--AUTOEXIT-->
+  </div>
+</header>
+
+<main class="grid">
+
+  <div class="col">
+    <section class="card">
+      <div class="card-head">
+        <h2>实时画面</h2>
+      </div>
+      <div class="cam">
+        <img src="/api/stream" alt="摄像头实时画面">
+        <span class="cam-tag" id="camtag"><i></i><span id="camtag-tx">检测中</span></span>
+      </div>
+      <div class="metrics">
+        <div class="metric"><span>检测结果</span><b id="det">-</b></div>
+        <div class="metric"><span>相似度阈值</span><b id="thr">-</b></div>
+        <div class="metric"><span>口令哈希</span><b id="pwd">-</b></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>登录状态</h2>
+        <span class="badge" id="badge-session">未登录</span>
+      </div>
+      <div class="metrics">
+        <div class="metric mt-lg"><span>当前用户</span><b id="who">未登录</b></div>
+        <div class="metric mt-lg"><span>人脸模板</span><b id="samples">0 组</b></div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-primary" onclick="enroll()">录入人脸</button>
+        <button class="btn" onclick="logout()">退出登录</button>
+      </div>
+      <details class="danger">
+        <summary>删除我的人脸数据</summary>
+        <p class="hint">人脸模板属于敏感生物特征信息。删除后该账号将无法再用人脸登录，只能改用密码。此操作需要再次输入密码确认。</p>
+        <label for="delpwd">密码</label>
+        <input id="delpwd" type="password" placeholder="输入当前账号的密码" autocomplete="current-password">
+        <div class="actions">
+          <button class="btn btn-danger btn-sm" onclick="deleteFace()">确认删除全部模板</button>
+        </div>
+      </details>
+    </section>
+  </div>
+
+  <div class="col">
+    <section class="card">
+      <div class="card-head"><h2>登录</h2></div>
+      <label for="lu">用户名</label>
+      <input id="lu" placeholder="请输入用户名" autocomplete="username" autofocus>
+      <label for="lp">密码</label>
+      <input id="lp" type="password" placeholder="密码登录时填写" autocomplete="current-password">
+      <div class="actions">
+        <button class="btn btn-primary" onclick="loginFace()">人脸登录</button>
+        <button class="btn" onclick="loginPassword()">密码登录</button>
+      </div>
+      <p class="hint">人脸登录为「账号先行 + 1:1 比对」，只与本人模板比对，无需遍历所有用户；密码登录可随时回退。</p>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>注册新账号</h2></div>
+      <label for="ru">用户名</label>
+      <input id="ru" placeholder="3–32 位字母、数字、下划线" autocomplete="off">
+      <label for="rp">密码</label>
+      <input id="rp" type="password" placeholder="至少 6 位" autocomplete="new-password">
+      <div class="actions">
+        <button class="btn btn-primary" onclick="register()">注册并登录</button>
+      </div>
+      <p class="hint">注册成功后请立刻录入人脸，否则该账号只能使用密码登录。</p>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>阈值校准</h2>
+        <span class="badge" id="badge-thr">-</span>
+      </div>
+      <label for="thrv">相似度阈值</label>
+      <input id="thrv" type="number" step="0.01" min="0.2" max="0.95" value="0.5">
+      <div class="actions">
+        <button class="btn" onclick="setThreshold()">更新阈值</button>
+      </div>
+      <p class="hint">阈值越高越严格。建议先用本人多次样本测出相似度下限，再用他人样本测误接受率，最后定值。</p>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>审计记录</h2>
+        <span class="badge" id="badge-audit">登录后可见</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>时间</th><th>方式</th><th>结果</th><th>相似度</th><th>说明</th></tr></thead>
+          <tbody id="audit"><tr><td colspan="5" class="empty">登录后可见</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+</main>
+
+<div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+/* ---------------- 结果提示 ---------------- */
+function toast(text, cls){
+  const stack = $('toasts');
+  const box = document.createElement('div');
+  box.className = 'toast ' + (cls || '');
+  box.textContent = text;
+  stack.appendChild(box);
+  const stay = (cls === 'bad' || cls === 'warn') ? 6500 : 3600;
+  setTimeout(() => {
+    box.style.transition = 'opacity .3s, transform .3s';
+    box.style.opacity = '0';
+    box.style.transform = 'translateY(7px)';
+    setTimeout(() => box.remove(), 320);
+  }, stay);
+}
+
+/* ---------------- 请求封装 ---------------- */
+async function post(url, body){
+  const r = await fetch(url, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(body || {})
+  });
+  return r.json();
+}
+async function guard(fn){
+  document.body.classList.add('busy');
+  try { await fn(); }
+  catch(e){ toast('请求失败：' + e, 'bad'); }
+  finally {
+    document.body.classList.remove('busy');
+    refresh();
+  }
+}
+/* 锁定与失败用同一套配色：locked 走 warn，其余失败走 bad */
+const toneOf = r => r.ok ? 'ok' : (r.error === 'locked' ? 'warn' : 'bad');
+
+/* ---------------- 业务动作 ---------------- */
+function register(){ guard(async () => {
+  toast('正在注册…');
+  const r = await post('/api/register', {username: $('ru').value.trim(), password: $('rp').value});
+  toast(r.message || r.error, toneOf(r));
+  if (r.ok) $('lu').value = r.username;
+}); }
+
+function loginPassword(){ guard(async () => {
+  toast('正在校验密码…');
+  const r = await post('/api/login/password', {username: $('lu').value.trim(), password: $('lp').value});
+  toast(r.message || r.error, toneOf(r));
+  if (r.ok) $('lp').value = '';
+}); }
+
+function loginFace(){ guard(async () => {
+  toast('正在验证，请正对摄像头…');
+  const r = await post('/api/login/face', {username: $('lu').value.trim()});
+  const extra = r.cosine !== undefined
+    ? '（相似度 ' + r.cosine + ' / 阈值 ' + r.threshold + '，' + (r.ms || 0) + 'ms）'
+    : '';
+  toast((r.message || r.error) + extra, toneOf(r));
+}); }
+
+function enroll(){ guard(async () => {
+  toast('正在采集 3 组样本，请保持正对摄像头…');
+  const r = await post('/api/enroll');
+  toast(r.message || r.error, toneOf(r));
+}); }
+
+function deleteFace(){ guard(async () => {
+  if (!confirm('确定删除你的人脸模板吗？删除后需重新录入才能人脸登录。')) return;
+  const r = await post('/api/face/delete', {password: $('delpwd').value});
+  toast(r.message || r.error, toneOf(r));
+  $('delpwd').value = '';
+}); }
+
+function logout(){ guard(async () => {
+  const r = await post('/api/logout');
+  toast(r.message, 'ok');
+}); }
+
+function setThreshold(){ guard(async () => {
+  const r = await post('/api/threshold', {value: parseFloat($('thrv').value)});
+  toast(r.message || r.error, toneOf(r));
+}); }
+
+/* ---------------- 状态轮询（同时充当服务端心跳）---------------- */
+async function refresh(){
+  try {
+    const s = await (await fetch('/api/state')).json();
+
+    const hit = s.faces > 0;
+    $('det').textContent = hit ? ('1 张 · ' + s.det_score) : '未检测到人脸';
+    $('det').style.color = hit ? '#a7f3d0' : '';
+    $('camtag').classList.toggle('hit', hit);
+    $('camtag-tx').textContent = hit ? '已检测到人脸' : '未检测到人脸';
+
+    $('thr').textContent = s.threshold;
+    $('badge-thr').textContent = '当前 ' + s.threshold;
+    $('pwd').textContent = s.password_backend;
+
+    $('who').textContent = s.logged_in ? s.username : '未登录';
+    $('samples').textContent = s.face_samples + ' 组';
+    $('badge-session').textContent = s.logged_in ? ('已登录 · ' + s.username) : '未登录';
+    $('badge-session').classList.toggle('on', !!s.logged_in);
+
+    if (s.logged_in){
+      const a = await (await fetch('/api/audit?limit=15')).json();
+      if (a.ok){
+        $('audit').innerHTML = a.events.length
+          ? a.events.map(e =>
+              '<tr><td>' + e.time + '</td><td>' + e.method + '</td><td class="' + (e.success ? 'y' : 'n') + '">' +
+              (e.success ? '成功' : '失败') + '</td><td>' + (e.similarity ?? '-') + '</td><td>' + (e.detail || '') + '</td></tr>'
+            ).join('')
+          : '<tr><td colspan="5" class="empty">暂无记录</td></tr>';
+        $('badge-audit').textContent = a.events.length + ' 条';
+      }
+    } else {
+      $('audit').innerHTML = '<tr><td colspan="5" class="empty">登录后可见</td></tr>';
+      $('badge-audit').textContent = '登录后可见';
+    }
+  } catch(e){ /* 服务正在退出时忽略 */ }
+}
+
+/* ---------------- 关闭页面 → 通知服务端退出并释放摄像头 ---------------- */
+function notifyBye(){ try { navigator.sendBeacon('/api/bye'); } catch(e){} }
+addEventListener('pagehide', notifyBye);
+addEventListener('beforeunload', notifyBye);
+
+setInterval(refresh, 2000);
+refresh();
+</script>
+</body>
+</html>

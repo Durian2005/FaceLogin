@@ -440,175 +440,36 @@ def api_threshold():
     return jsonify({"ok": True, "threshold": value, "message": "阈值已更新为 %.2f" % value})
 
 
-PAGE = r"""<!doctype html>
-<html lang="zh"><head><meta charset="utf-8"><title>人脸登录系统</title>
-<style>
-:root{--bg:#15181c;--card:#232a32;--line:#3a434e;--line2:#4a5563;--tx:#e8e8e8;--tx2:#b8c0ca}
-*{box-sizing:border-box}
-body{font-family:system-ui,sans-serif;background:var(--bg);color:var(--tx);margin:0;padding:20px}
-h1{font-size:18px;font-weight:500;margin:0 0 4px}
-.sub{font-size:12px;color:var(--tx2);margin-bottom:16px}
-.wrap{display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap}
-.col{display:flex;flex-direction:column;gap:14px;flex:1;min-width:300px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
-.card h2{font-size:14px;font-weight:500;margin:0 0 10px;color:#d5dde6}
-img{width:100%;max-width:520px;border-radius:8px;background:#000;display:block}
-label{display:block;font-size:12px;color:var(--tx2);margin:8px 0 4px}
-input{width:100%;padding:8px;border-radius:6px;border:1px solid var(--line2);background:#1b2026;color:var(--tx);font-size:13px}
-button{margin:10px 8px 0 0;padding:8px 13px;border-radius:6px;border:1px solid var(--line2);background:#2d3742;color:var(--tx);cursor:pointer;font-size:13px}
-button:hover{background:#38434f}
-button:disabled{opacity:.45;cursor:not-allowed}
-.bar{display:flex;gap:18px;flex-wrap:wrap;font-size:12px;color:var(--tx2);margin-top:10px;line-height:1.8}
-.bar b{color:#e8e8e8;font-weight:500}
-.msg{margin-top:10px;font-size:13px;line-height:1.6;min-height:20px}
-.ok{color:#4ade80}.bad{color:#f87171}.warn{color:#fbbf24}
-table{width:100%;border-collapse:collapse;font-size:12px}
-th,td{text-align:left;padding:5px 6px;border-bottom:1px solid #313a44;color:var(--tx2)}
-th{color:#8d97a3;font-weight:500}
-td.y{color:#4ade80}td.n{color:#f87171}
-.hint{font-size:12px;color:#8d97a3;line-height:1.7;margin-top:8px}
-.row{display:flex;gap:10px}.row>div{flex:1}
-</style></head><body>
-<h1>本地人脸登录系统</h1>
-<div class="sub">离线运行 · 模板存 SQLite · 密码用 Argon2id 哈希 · 失败 3 次锁定 3 分钟 <!--AUTOEXIT--></div>
-<div class="wrap">
-  <div class="col" style="max-width:540px">
-    <div class="card">
-      <img src="/api/stream" alt="camera">
-      <div class="bar">
-        <span>检测：<b id="det">-</b></span>
-        <span>阈值：<b id="thr">-</b></span>
-        <span>密码哈希：<b id="pwd">-</b></span>
-      </div>
-    </div>
-    <div class="card">
-      <h2>登录状态</h2>
-      <div class="bar"><span>当前用户：<b id="who">未登录</b></span><span>人脸模板：<b id="samples">0</b> 组</span></div>
-      <button onclick="enroll()">录入人脸</button>
-      <button onclick="logout()">退出登录</button>
-      <label>删除人脸数据需再次输入密码</label>
-      <input id="delpwd" type="password" placeholder="输入密码以删除本人人脸数据">
-      <button onclick="deleteFace()">删除我的所有人脸数据</button>
-      <div class="hint">人脸模板属于敏感生物特征信息，删除后该账号将无法再用人脸登录，只能改用密码。</div>
-    </div>
-  </div>
+# ---------------------------------------------------------------- page
 
-  <div class="col">
-    <div class="card">
-      <h2>登录</h2>
-      <label>用户名</label><input id="lu" placeholder="请输入用户名" autocomplete="username" autofocus>
-      <label>密码</label><input id="lp" type="password" placeholder="密码登录时填写">
-      <button onclick="loginFace()">人脸登录</button>
-      <button onclick="loginPassword()">密码登录</button>
-      <div class="hint">人脸登录为「账号先行 + 1:1 比对」，无需遍历所有用户；密码登录可随时回退。</div>
-    </div>
-    <div class="card">
-      <h2>注册新账号</h2>
-      <label>用户名</label><input id="ru" placeholder="3-32 位字母数字下划线">
-      <label>密码</label><input id="rp" type="password" placeholder="至少 6 位">
-      <button onclick="register()">注册并登录</button>
-      <div class="hint">注册后请立刻录入人脸；否则该账号只能用密码登录。</div>
-    </div>
-    <div class="card">
-      <h2>阈值校准</h2>
-      <div class="bar"><span>当前阈值：<b id="thr2">-</b></span></div>
-      <input id="thrv" type="number" step="0.01" min="0.2" max="0.95" value="0.5">
-      <button onclick="setThreshold()">更新阈值</button>
-      <div class="hint">阈值越高越严格。先用本人多次样本测下限，再用他人样本测误接受，再定值。</div>
-    </div>
-    <div class="card">
-      <h2>审计记录（本人）</h2>
-      <table><thead><tr><th>时间</th><th>方式</th><th>结果</th><th>相似度</th><th>说明</th></tr></thead>
-      <tbody id="audit"><tr><td colspan="5">登录后可见</td></tr></tbody></table>
-    </div>
-  </div>
-</div>
+TEMPLATE_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "templates", "index.html"
+)
 
-<script>
-const $=id=>document.getElementById(id);
-let msgEl=null;
-function flash(text,cls){
-  if(!msgEl){msgEl=document.createElement('div');msgEl.className='card';msgEl.style.marginTop='14px';
-    msgEl.innerHTML='<h2>操作结果</h2><div class="msg" id="msgtxt"></div>';document.body.appendChild(msgEl);}
-  const t=$('msgtxt');t.className='msg '+(cls||'');t.textContent=text;
-}
-async function post(url,body){
-  const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
-  return r.json();
-}
-async function guard(fn){try{await fn();}catch(e){flash('请求失败：'+e,'bad');}finally{refresh();}}
 
-function register(){guard(async()=>{
-  flash('正在注册…');
-  const r=await post('/api/register',{username:$('ru').value.trim(),password:$('rp').value});
-  flash(r.message||r.error, r.ok?'ok':'bad');
-  if(r.ok)$('lu').value=r.username;
-});}
-function loginPassword(){guard(async()=>{
-  flash('正在校验密码…');
-  const r=await post('/api/login/password',{username:$('lu').value.trim(),password:$('lp').value});
-  flash(r.message||r.error, r.ok?'ok':(r.error==='locked'?'warn':'bad'));
-});}
-function loginFace(){guard(async()=>{
-  flash('正在验证，请正对摄像头…');
-  const r=await post('/api/login/face',{username:$('lu').value.trim()});
-  let extra=r.cosine!==undefined?'（相似度 '+r.cosine+' / 阈值 '+r.threshold+'，'+(r.ms||0)+'ms）':'';
-  flash((r.message||r.error)+extra, r.ok?'ok':(r.error==='locked'?'warn':'bad'));
-});}
-function enroll(){guard(async()=>{
-  flash('正在采集 3 组样本，请保持正对摄像头…');
-  const r=await post('/api/enroll');
-  flash(r.message||r.error, r.ok?'ok':'bad');
-});}
-function deleteFace(){guard(async()=>{
-  if(!confirm('确定删除你的人脸模板吗？删除后需重新录入才能人脸登录。'))return;
-  const r=await post('/api/face/delete',{password:$('delpwd').value});
-  flash(r.message||r.error, r.ok?'ok':'bad');
-  $('delpwd').value='';
-});}
-function logout(){guard(async()=>{const r=await post('/api/logout');flash(r.message,'ok');});}
-function setThreshold(){guard(async()=>{
-  const r=await post('/api/threshold',{value:parseFloat($('thrv').value)});
-  flash(r.message||r.error, r.ok?'ok':'bad');
-});}
+def render_page():
+    """读取单文件 HTML 模板，并注入运行时提示。
 
-async function refresh(){
-  try{
-    const s=await (await fetch('/api/state')).json();
-    $('det').textContent = s.faces>0 ? ('1 张 · '+s.det_score) : '未检测到人脸';
-    $('thr').textContent = s.threshold; $('thr2').textContent = s.threshold;
-    $('pwd').textContent = s.password_backend;
-    $('who').textContent = s.logged_in ? s.username : '未登录';
-    $('samples').textContent = s.face_samples;
-    if(s.logged_in){
-      const a=await (await fetch('/api/audit?limit=15')).json();
-      if(a.ok){
-        $('audit').innerHTML = a.events.length? a.events.map(e=>
-          '<tr><td>'+e.time+'</td><td>'+e.method+'</td><td class="'+(e.success?'y':'n')+'">'+
-          (e.success?'成功':'失败')+'</td><td>'+(e.similarity??'-')+'</td><td>'+(e.detail||'')+'</td></tr>'
-        ).join('') : '<tr><td colspan="5">暂无记录</td></tr>';
-      }
-    }else{
-      $('audit').innerHTML='<tr><td colspan="5">登录后可见</td></tr>';
-    }
-  }catch(e){}
-}
-function notifyBye(){try{navigator.sendBeacon('/api/bye');}catch(e){}}
-addEventListener('pagehide',notifyBye);
-addEventListener('beforeunload',notifyBye);
-setInterval(refresh,2000); refresh();
-</script></body></html>"""
+    模板单独放在 app/templates/index.html，为的是拿到正常的 HTML / CSS 高亮与
+    格式化；它不引用任何 CDN、不经过任何构建步骤 —— 「clone 下来双击即用」
+    这条底线必须保住。
+    """
+    with open(TEMPLATE_PATH, "r", encoding="utf-8") as fh:
+        html = fh.read()
+    if AUTO_EXIT:
+        hint = ('<span class="chip exit"><i></i>关闭本页约 %.0f 秒后自动停止服务并释放摄像头</span>'
+                % EXIT_GRACE)
+    else:
+        hint = ""
+    return html.replace("<!--AUTOEXIT-->", hint)
 
 
 @app.route("/")
 def index():
-    if AUTO_EXIT:
-        hint = ('<span style="color:#fbbf24">关闭本页约 %.0f 秒后自动停止服务、释放摄像头</span>'
-                % EXIT_GRACE)
-    else:
-        hint = ""
-    return Response(PAGE.replace("<!--AUTOEXIT-->", hint),
-                    mimetype="text/html; charset=utf-8")
+    # mimetype 只给 text/html，charset 由 Flask 自动补上（否则会重复两遍）
+    return Response(render_page(), mimetype="text/html")
+
+
 
 
 if __name__ == "__main__":

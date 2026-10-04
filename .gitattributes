@@ -27,3 +27,6 @@
 *.json text
 *.yml text
 *.yaml text
+*.html text
+*.css text
+*.js text
