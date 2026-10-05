@@ -8,7 +8,6 @@ import time
 from datetime import datetime
 
 import cv2
-import numpy as np
 from flask import Flask, Response, jsonify, request, session
 
 import db

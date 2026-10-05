@@ -104,6 +104,17 @@ check("拒绝看起来像 localhost 的域名",
       not reqguard.host_allowed("attacker.localhost.evil.com", HOSTS))
 check("拒绝空 Host", not reqguard.host_allowed("", HOSTS))
 check("拒绝 None", not reqguard.host_allowed(None, HOSTS))
+# Host 校验刻意**不看端口** —— 详细理由见 reqguard.host_allowed 的注释。
+# 这条是改端口就全站 403 那个自伤故障的回归锁。
+check("回环名 + 任意端口 => 放行（端口不是承重点）",
+      reqguard.host_allowed("127.0.0.1:49975", HOSTS))
+check("IPv6 回环 + 任意端口 => 放行",
+      reqguard.host_allowed("[::1]:49975", HOSTS))
+# 但「主机名对、尾巴是垃圾」不能骗过去（手工按冒号切就会栽在这）
+check("拒绝 127.0.0.1:8080.evil.com 这类拼接",
+      not reqguard.host_allowed("127.0.0.1:8080.evil.com", HOSTS))
+check("拒绝带 userinfo 的 Host（evil.com@127.0.0.1）",
+      not reqguard.host_allowed("evil.com@127.0.0.1", HOSTS))
 
 # ---------------------------------------------------------------- Origin
 
@@ -255,6 +266,140 @@ with db.connect() as conn:
 good, detail = db.verify_audit_chain()
 check("只改链字段（prev_hash）=> 也检出",
       (not good) and detail.get("reason") == "prev_hash_mismatch", str(detail.get("reason")))
+
+# ---------------------------------------------------------------- 真机 socket
+#
+# 为什么非要有这一节：Flask 的 test_client() 是**进程内直调 WSGI**，
+# 它绕过"值是怎么送进浏览器"的那段链路。本项目就栽过一次 —— 模板里
+# <!--PAGETOKEN--> 被替换成了一行裸文本而不是塞进 <meta content="...">，
+# querySelector 取不到 → 令牌为空 → 摄像头画面一直 403。而 test_client
+# 直接拿 server.PAGE_TOKEN 做断言，全绿。
+# 所以这一节起一个**真 socket**，用 http.client 发原始请求，按浏览器实际
+# 会在线上发出的字节来验。
+
+print("\n[8] 真机 socket 探测（补 test_client 的盲区）")
+
+import http.client  # noqa: E402
+import json  # noqa: E402
+import re  # noqa: E402
+import threading  # noqa: E402
+from werkzeug.serving import make_server  # noqa: E402
+
+_srv = make_server("127.0.0.1", 0, server.app, threaded=True)
+PORT = _srv.server_port
+_srv_thread = threading.Thread(target=_srv.serve_forever, daemon=True)
+_srv_thread.start()
+print("  真服务已起在 127.0.0.1:%d" % PORT)
+
+# 生产里 ALLOWED_HOSTS 由唯一的端口来源 PORT 推出，和 app.run 绑的端口天然一致。
+# 测试为了不占用固定端口，绑的是随机端口，所以这里按「实际监听的端口」重建一次
+# 白名单 —— 这不是绕过校验，而是把服务配置成它真实监听的地址，和生产同一个做法。
+# （Host 那半不看端口，所以本来就不受影响；受影响的是要求端口精确匹配的 Origin。）
+_orig_allowed = server.ALLOWED_HOSTS
+server.ALLOWED_HOSTS = reqguard.allowed_hosts(PORT)
+assert server.ALLOWED_HOSTS is not _orig_allowed
+
+
+def raw(method, path, headers=None, body=None):
+    """发一个原始 HTTP 请求。Host 头由调用方完全掌控（skip_host=True）。"""
+    conn = http.client.HTTPConnection("127.0.0.1", PORT, timeout=15)
+    try:
+        conn.putrequest(method, path, skip_host=True, skip_accept_encoding=True)
+        for k, v in (headers or {}).items():
+            conn.putheader(k, v)
+        if body is not None:
+            conn.putheader("Content-Length", str(len(body)))
+        conn.endheaders(body)
+        resp = conn.getresponse()
+        return resp.status, resp.read().decode("utf-8", "replace")
+    finally:
+        conn.close()
+
+
+REAL_HOST = "127.0.0.1:%d" % PORT
+
+try:
+    # --- 真机上的 Host 校验 ---
+    st, _ = raw("GET", "/", {"Host": "evil.com:5000"})
+    check("真机上伪造 Host => 403", st == 403, "got %d" % st)
+    st, _ = raw("GET", "/api/state", {"Host": "evil.com:%d" % PORT})
+    check("真机上伪造 Host 打 /api/state => 403", st == 403, "got %d" % st)
+
+    st, body = raw("GET", "/", {"Host": REAL_HOST})
+    check("真机上正常 Host 访问首页 => 200", st == 200, "got %d" % st)
+    # 这一条是整节的重点：从**真响应体**里把令牌抠出来，再拿它去打流接口。
+    # 只有它能证明"令牌真的流到了浏览器能看到的位置"。
+    m = re.search(r'name="page-token"\s+content="([^"]+)"', body)
+    check("真响应体里能正则抠出页面令牌", m is not None)
+    sock_token = m.group(1) if m else ""
+    check("抠出来的令牌与实际一致", sock_token == server.PAGE_TOKEN,
+          "sock=%s.. server=%s.." % (sock_token[:8], server.PAGE_TOKEN[:8]))
+
+    # --- 真机上的 Origin 校验 ---
+    st, _ = raw("POST", "/api/register",
+                {"Host": REAL_HOST, "Origin": "http://evil.com",
+                 "Content-Type": "application/json"},
+                b'{"username":"sock_evil","password":"Probe#12345"}')
+    check("真机上跨站 Origin 注册 => 403", st == 403, "got %d" % st)
+    check("该请求确实没建号", db.get_user("sock_evil") is None)
+
+    st, _ = raw("POST", "/api/register",
+                {"Host": REAL_HOST, "Origin": "null",
+                 "Content-Type": "application/json"},
+                b'{"username":"sock_null","password":"Probe#12345"}')
+    check("真机上 Origin: null => 403", st == 403, "got %d" % st)
+
+    # Origin 校验必须**端口精确**：本机别的端口上的服务不得冒充本站。
+    # 这条同时证明上面重建白名单没有把 Origin 检查放松掉。
+    st, _ = raw("POST", "/api/register",
+                {"Host": REAL_HOST, "Origin": "http://127.0.0.1:8080",
+                 "Content-Type": "application/json"},
+                b'{"username":"sock_other","password":"Probe#12345"}')
+    check("真机上别的回环端口当 Origin => 403（端口精确匹配）",
+          st == 403, "got %d" % st)
+    check("该请求确实没建号", db.get_user("sock_other") is None)
+
+    # 不带 Origin/Referer（curl、本机脚本）应当放行 —— 否则把自动化全挡死了
+    st, body = raw("POST", "/api/register",
+                   {"Host": REAL_HOST, "Content-Type": "application/json",
+                    "Origin": "http://" + REAL_HOST},
+                   b'{"username":"sock_ok","password":"Probe#12345"}')
+    check("真机上同源 Origin 注册 => 200", st == 200, "got %d" % st)
+    st, body = raw("POST", "/api/register",
+                   {"Host": REAL_HOST, "Content-Type": "application/json"},
+                   b'{"username":"sock_curl","password":"Probe#12345"}')
+    check("真机上不带 Origin（curl 类客户端）=> 放行", st == 200, "got %d" % st)
+    check("curl 类客户端确实建了号", db.get_user("sock_curl") is not None)
+
+    # --- 真机上的流接口令牌 ---
+    st, _ = raw("GET", "/api/stream", {"Host": REAL_HOST})
+    check("真机上无令牌访问摄像头流 => 403", st == 403, "got %d" % st)
+    st, _ = raw("GET", "/api/stream?t=wrong", {"Host": REAL_HOST})
+    check("真机上错误令牌访问流 => 403", st == 403, "got %d" % st)
+
+    _real_gen2 = server.gen_frames
+    server.gen_frames = lambda: iter([b"--frame\r\n\r\n"])
+    try:
+        st, _ = raw("GET", "/api/stream?t=" + sock_token, {"Host": REAL_HOST})
+        check("真机上用**从 HTML 抠出的**令牌访问流 => 200", st == 200, "got %d" % st)
+    finally:
+        server.gen_frames = _real_gen2
+
+    # --- 真机上的 bye 令牌 ---
+    st, _ = raw("POST", "/api/bye", {"Host": REAL_HOST})
+    check("真机上无令牌 bye => 403", st == 403, "got %d" % st)
+    st, body = raw("POST", "/api/bye?t=" + sock_token, {"Host": REAL_HOST})
+    # 注意别断言 '"ok": true'：Flask 在非 debug/testing 下用紧凑 JSON（无空格），
+    # 带空格的断言会在真机上永远失败。解析后判字段才稳。
+    bye_ok = False
+    try:
+        bye_ok = bool(json.loads(body).get("ok"))
+    except Exception:
+        pass
+    check("真机上带正确令牌 bye => 200", st == 200 and bye_ok, "got %d" % st)
+finally:
+    _srv.shutdown()
+    server.ALLOWED_HOSTS = _orig_allowed
 
 # ---------------------------------------------------------------- 汇总
 

@@ -35,14 +35,29 @@ import os
 import secrets
 from urllib.parse import urlsplit
 
-#: 允许的本机主机名。本服务只监听回环地址，所以白名单固定为这三种写法。
-LOOPBACK_NAMES = ("127.0.0.1", "localhost", "::1")
+#: 允许的本机主机名。本服务只监听回环地址，所以白名单固定为这几种写法。
+#: 注意 Origin 解析出来的主机名**不带方括号**（`urlsplit` 会剥掉），
+#: 而原始 Host 头里是带方括号的 `[::1]` —— 两种形态都要能对上。
+LOOPBACK_NAMES = ("127.0.0.1", "localhost", "::1", "[::1]")
+
+
+def _extra_hosts():
+    """`FACELOGIN_EXTRA_HOSTS` 里手工追加的条目（逗号分隔，精确匹配）。"""
+    out = set()
+    for item in os.environ.get("FACELOGIN_EXTRA_HOSTS", "").split(","):
+        item = item.strip().lower()
+        if item:
+            out.add(item)
+    return out
 
 
 def allowed_hosts(port):
-    """构造 Host / Origin 白名单。
+    """构造白名单。返回值同时供 Host 校验与 Origin 校验使用，但两者用法不同：
 
-    同时收 "host:port" 与 "host:80" 两种形式：前者对应服务自己的地址，
+    - `host_allowed` **只看主机名**，不看端口（原因见那里）；
+    - `origin_allowed` 要求 `host:port` **精确匹配**，端口在这里是有意义的。
+
+    同时收 `host:port` 与 `host:80` 两种形式：前者对应服务自己的地址，
     后者对应通过 80 端口访问的场景（正常不会有，但不必人为制造意外拒绝）。
     """
     hosts = set()
@@ -50,23 +65,52 @@ def allowed_hosts(port):
         hosts.add(name)
         hosts.add("%s:%d" % (name, port))
         hosts.add("%s:80" % name)
-    hosts.add("[::1]")
-    hosts.add("[::1]:%d" % port)
-    hosts.add("[::1]:80")
-
-    extra = os.environ.get("FACELOGIN_EXTRA_HOSTS", "")
-    for item in extra.split(","):
-        item = item.strip().lower()
-        if item:
-            hosts.add(item)
+    hosts |= _extra_hosts()
     return frozenset(hosts)
 
 
+def _split_host_port(value):
+    """把 Host 头拆成 (主机名, 端口)。拆不出来时返回 ("", None)。
+
+    用 `urlsplit` 而不是手工按冒号切：手工切会被
+    `127.0.0.1:8080.evil.com` 这种「主机名对、尾巴是垃圾」的写法骗过去，
+    而 `urlsplit` 在端口不是纯数字时会直接报错。
+    """
+    if "@" in value:            # Host 里出现 userinfo 不是合法写法，直接否掉
+        return "", None
+    try:
+        parts = urlsplit("//" + value)
+        return (parts.hostname or "").lower(), parts.port
+    except ValueError:
+        return "", None
+
+
 def host_allowed(host_header, allowed):
-    """Host 头是否在白名单内。空 Host 一律拒绝（HTTP/1.0 客户端不带 Host）。"""
+    """Host 头是否指向本机回环名字。
+
+    ⚠️ **端口不参与判定**，这是刻意的。理由有两条：
+
+    1. 端口在防 DNS 重绑定里**不是承重点**。重绑定之后浏览器发的 Host 是
+       攻击者域名（`evil.com:5000` 这样），把它拦下靠的是「域名不是本机」，
+       端口对不对无关紧要。
+    2. 反过来，如果这里要求端口精确匹配，服务一旦绑到与预期不同的端口
+       （改了 `FACELOGIN_PORT`、或在测试里绑随机端口），就会把自己**全部
+       403 掉**。这个自伤故障是真机探测测出来的，不是推想出来的。
+
+    "攻击者页面直连 127.0.0.1" 那条路本来就**不是** Host 校验在管，
+    而是由 `origin_allowed` 管（它要求端口精确匹配）。
+
+    空 Host 一律拒绝（HTTP/1.0 客户端不带 Host）。
+    """
     if not host_header:
         return False
-    return host_header.strip().lower() in allowed
+    h = host_header.strip().lower()
+    if h in allowed:            # 兼容 FACELOGIN_EXTRA_HOSTS 的精确写法
+        return True
+    name, _port = _split_host_port(h)
+    if not name:
+        return False
+    return name in LOOPBACK_NAMES or name in allowed
 
 
 def _split_origin(value):

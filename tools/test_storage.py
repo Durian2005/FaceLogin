@@ -1,12 +1,24 @@
 """存储层自测：用户、模板、失败锁定、审计事件。
 
-用临时数据目录运行，不碰正式数据库：
-    FACELOGIN_DATA=<临时目录> python tools/test_storage.py
+**自带隔离**：数据目录在导入 db 之前就指向一个临时目录，所以
+`python tools/test_storage.py` 直接跑也不会碰到你的 data/faces.db。
+
+    .venv\\Scripts\\python.exe tools\\test_storage.py
+
+（早先这里只把隔离写进了文档：代码里读环境变量、不设就落到正式库上。
+直接跑一次就会往真实审计日志里写进 probe_user 的记录 —— 踩过一次，
+所以改成代码里强制隔离，不再依赖调用方。）
 """
 
 import os
 import sys
+import tempfile
 import time
+
+# ⚠️ 必须放在 import db 之前：数据目录是在 db 模块导入时读的。
+# 想跑在别的库上就显式设 FACELOGIN_DATA，否则一律用临时目录。
+if not os.environ.get("FACELOGIN_DATA"):
+    os.environ["FACELOGIN_DATA"] = tempfile.mkdtemp(prefix="facelogin-storage-")
 
 APP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app")
 sys.path.insert(0, os.path.abspath(APP_DIR))
