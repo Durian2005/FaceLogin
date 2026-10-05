@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
+<!-- 页面令牌由服务端注入（server.render_page）。摄像头画面与关页通知都靠它，
+     这样即使是本机上的其它网页，也拿不到画面、关不掉服务。 -->
+<meta name="page-token" content="<!--PAGETOKEN-->">
 <title>本地人脸识别登录</title>
 <style>
 /* ============================================================
@@ -256,7 +259,7 @@ td.empty{text-align:center;color:var(--tx-3);padding:18px 9px;white-space:normal
         <h2>实时画面</h2>
       </div>
       <div class="cam">
-        <img src="/api/stream" alt="摄像头实时画面">
+        <img id="stream" alt="摄像头实时画面">
         <span class="cam-tag" id="camtag"><i></i><span id="camtag-tx">检测中</span></span>
         <div class="live" id="live" hidden>
           <b id="live-tx">动作挑战</b>
@@ -330,10 +333,12 @@ td.empty{text-align:center;color:var(--tx-3);padding:18px 9px;white-space:normal
       </div>
       <label for="thrv">相似度阈值</label>
       <input id="thrv" type="number" step="0.01" min="0.2" max="0.95" value="0.5">
+      <label for="thrpwd">密码（仅调低阈值时必填）</label>
+      <input id="thrpwd" type="password" placeholder="调低阈值等于放宽认人条件" autocomplete="current-password">
       <div class="actions">
         <button class="btn" onclick="setThreshold()">更新阈值</button>
       </div>
-      <p class="hint">阈值越高越严格。建议先用本人多次样本测出相似度下限，再用他人样本测误接受率，最后定值。</p>
+      <p class="hint">阈值越高越严格。<b>调低阈值会放宽人脸判定，需要输入密码确认</b>；调高不设门槛。量化依据见 <code>docs/threshold-report.md</code>。</p>
     </section>
 
     <section class="card">
@@ -356,6 +361,11 @@ td.empty{text-align:center;color:var(--tx-3);padding:18px 9px;white-space:normal
 
 <script>
 const $ = id => document.getElementById(id);
+
+/* 页面令牌：服务端渲染时注入到 <meta>。摄像头画面与关页通知都靠它 ——
+   这样即便是本机上的其它网页，也拿不到画面、关不掉服务。 */
+const PAGE_TOKEN = (document.querySelector('meta[name="page-token"]') || {}).content || '';
+$('stream').src = '/api/stream?t=' + encodeURIComponent(PAGE_TOKEN);
 
 /* ---------------- 结果提示 ---------------- */
 function toast(text, cls){
@@ -480,8 +490,12 @@ function logout(){ guard(async () => {
 }); }
 
 function setThreshold(){ guard(async () => {
-  const r = await post('/api/threshold', {value: parseFloat($('thrv').value)});
+  const r = await post('/api/threshold', {
+    value: parseFloat($('thrv').value),
+    password: $('thrpwd').value
+  });
   toast(r.message || r.error, toneOf(r));
+  if (r.ok) $('thrpwd').value = '';
 }); }
 
 /* ---------------- 状态轮询（同时充当服务端心跳）---------------- */
@@ -526,7 +540,7 @@ async function refresh(){
 }
 
 /* ---------------- 关闭页面 → 通知服务端退出并释放摄像头 ---------------- */
-function notifyBye(){ try { navigator.sendBeacon('/api/bye'); } catch(e){} }
+function notifyBye(){ try { navigator.sendBeacon('/api/bye?t=' + encodeURIComponent(PAGE_TOKEN)); } catch(e){} }
 addEventListener('pagehide', notifyBye);
 addEventListener('beforeunload', notifyBye);
 

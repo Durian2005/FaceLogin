@@ -14,6 +14,7 @@ from flask import Flask, Response, jsonify, request, session
 import db
 import liveness
 import paths
+import reqguard
 import security
 from face import FaceEngine, pack, unpack
 from model_paths import MODELS_DIR
@@ -29,6 +30,41 @@ app.config.update(
     SESSION_COOKIE_SAMESITE="Lax",
     PERMANENT_SESSION_LIFETIME=3600 * 8,
 )
+
+# ------------------------------------------------- 请求来源校验
+# 本地服务最现实的攻击面是「你自己的浏览器」：恶意页面可以在你不知情时向
+# 127.0.0.1:5000 发请求。详见 app/reqguard.py 的模块说明。
+PORT = int(os.environ.get("FACELOGIN_PORT", "5000"))
+ALLOWED_HOSTS = reqguard.allowed_hosts(PORT)
+#: 每进程随机，重启即失效。只有本服务渲染出去的页面才知道它，
+#: 用来保护那些「不能要求登录态」的接口（登录前就要显示摄像头画面）。
+PAGE_TOKEN = reqguard.new_page_token()
+
+
+@app.before_request
+def _guard_request():
+    """Host / Origin 双闸门。
+
+    必须注册在 _touch_liveness 之前：被拒绝的跨站请求不该顺手续上心跳，
+    否则攻击者只要持续发垃圾请求就能让服务永远不自动退出。
+    """
+    if not reqguard.host_allowed(request.host, ALLOWED_HOSTS):
+        # Host 是攻击者域名 => DNS rebinding 的典型特征，直接掐断
+        return jsonify({"ok": False, "error": "bad_host",
+                        "message": "请求的 Host 不在允许列表内"}), 403
+    if request.method not in ("GET", "HEAD", "OPTIONS"):
+        if not reqguard.origin_allowed(request.headers.get("Origin"),
+                                       request.headers.get("Referer"),
+                                       ALLOWED_HOSTS):
+            return jsonify({"ok": False, "error": "bad_origin",
+                            "message": "请求来源不被允许"}), 403
+    return None
+
+
+def _page_token_ok():
+    supplied = request.args.get("t") or request.headers.get("X-Page-Token")
+    return reqguard.token_matches(supplied, PAGE_TOKEN)
+
 
 engine = FaceEngine()
 
@@ -109,6 +145,9 @@ def _touch_liveness():
 
 @app.route("/api/bye", methods=["POST"])
 def api_bye():
+    # 同样用页面令牌：这个接口能触发服务退出，不能让任意网页随便调。
+    if not _page_token_ok():
+        return jsonify({"ok": False, "error": "bad_token"}), 403
     scheduled = _mark_leaving()
     return jsonify({"ok": True, "scheduled": scheduled, "grace": EXIT_GRACE})
 
@@ -193,6 +232,11 @@ def gen_frames():
 
 @app.route("/api/stream")
 def api_stream():
+    # 摄像头画面是这套系统里最敏感的输出，但它在登录前就要显示（注册与
+    # 活体挑战都要看得见自己），所以不能用登录态来保护 —— 改用页面令牌。
+    if not _page_token_ok():
+        return jsonify({"ok": False, "error": "bad_token",
+                        "message": "缺少或错误的页面令牌"}), 403
     return Response(gen_frames(), mimetype="multipart/x-mixed-replace; boundary=frame")
 
 
@@ -213,6 +257,10 @@ def api_state():
 
 @app.route("/api/shutdown", methods=["POST"])
 def api_shutdown():
+    # 这里刻意**不要求**页面令牌：全项目没有任何调用方（停止服务.bat 是按
+    # PID 直接杀的），保留无令牌是为了让本机脚本还能用它。安全性由
+    # _guard_request 的 Origin 校验兜住 —— 跨站表单一定带别人的 Origin，
+    # 会被 403；而一个已经能在本机跑命令的进程，本来就能 taskkill。
     def stop():
         time.sleep(0.4)
         os._exit(0)
@@ -548,16 +596,34 @@ def api_threshold():
     user, err = require_login()
     if err:
         return err
+    data = request.get_json(silent=True) or {}
     try:
-        value = float((request.get_json(silent=True) or {}).get("value"))
+        value = float(data.get("value"))
     except (TypeError, ValueError):
         return jsonify({"ok": False, "error": "invalid_value"})
     if not 0.20 <= value <= 0.95:
         return jsonify({"ok": False, "error": "out_of_range",
                         "message": "阈值请设在 0.20 到 0.95 之间"})
+
+    current = THRESHOLD["value"]
+    if value < current - 1e-9:
+        # 调低阈值 = 放宽认人条件，是一次**安全降级**。若任何一个已登录用户
+        # 都能随手调低，人脸登录这道关就等于形同虚设；所以要求重新输入本人
+        # 口令确认。调高不设门槛（那是收紧，不会削弱任何人的防护）。
+        password = data.get("password") or ""
+        if not password:
+            db.add_event(user["username"], "threshold", False, detail="password_required")
+            return jsonify({"ok": False, "error": "password_required",
+                            "message": "调低阈值会放宽人脸判定，需要输入密码确认"})
+        if not security.verify_password(user["pwd_hash"], password):
+            db.add_event(user["username"], "threshold", False, detail="bad_password")
+            return jsonify({"ok": False, "error": "auth_failed",
+                            "message": "密码不正确，阈值未修改"})
+
     db.set_setting("threshold", value)
     THRESHOLD["value"] = value
-    db.add_event(user["username"], "threshold", True, detail="set_%.2f" % value)
+    db.add_event(user["username"], "threshold", True,
+                 detail="set_%.2f_from_%.2f" % (value, current))
     return jsonify({"ok": True, "threshold": value, "message": "阈值已更新为 %.2f" % value})
 
 
@@ -582,7 +648,9 @@ def render_page():
                 % EXIT_GRACE)
     else:
         hint = ""
-    return html.replace("<!--AUTOEXIT-->", hint)
+    html = html.replace("<!--AUTOEXIT-->", hint)
+    # 页面令牌注入：/api/stream 与 /api/bye 靠它认「这是本服务发出的页面」
+    return html.replace("<!--PAGETOKEN-->", PAGE_TOKEN)
 
 
 @app.route("/")
@@ -600,4 +668,4 @@ if __name__ == "__main__":
     print("CAMERA_OPEN", engine.camera_ready())
     print("LIVENESS", LIVENESS_ENABLED)
     print("MODELS_DIR", MODELS_DIR)
-    app.run(host="127.0.0.1", port=5000, threaded=True)
+    app.run(host="127.0.0.1", port=PORT, threaded=True)

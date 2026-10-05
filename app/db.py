@@ -6,6 +6,7 @@
 - 失败计数与锁定时间跟用户记录放在一起，重启后仍然有效。
 """
 
+import hashlib
 import os
 import secrets
 import sqlite3
@@ -50,7 +51,9 @@ CREATE TABLE IF NOT EXISTS login_events (
     method     TEXT    NOT NULL,
     success    INTEGER NOT NULL,
     similarity REAL,
-    detail     TEXT
+    detail     TEXT,
+    prev_hash  TEXT,
+    entry_hash TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_events_ts ON login_events(ts DESC);
 
@@ -73,6 +76,7 @@ def connect():
 def init_db():
     with connect() as conn:
         conn.executescript(SCHEMA)
+        _migrate_audit_chain(conn)
     return DB_PATH
 
 
@@ -220,14 +224,116 @@ def delete_templates(user_id):
 
 
 # ---------------------------------------------------------------- audit
+#
+# 审计日志用**哈希链**串起来：每条记录都带上前一条的哈希，任何一条被改动
+# （哪怕只改一个字符），从它往后的所有 entry_hash 都会对不上。
+#
+# 这解决的是一个很具体的弱点：审计表的价值全在"事后能证明发生过什么"，
+# 而在此之前，谁拿到 data/faces.db 都能直接 UPDATE 一条记录把登录失败
+# 改成成功，或者删掉自己的痕迹，事后完全看不出来。
+#
+# 边界（必须说清楚）：哈希链只能证明"被改过"，不能阻止改动。攻击者可以
+# 把整条链重算一遍 —— 除非链头被锚定在别处。本项目是本地单机，链头就存在
+# 同一个库里，所以它防的是"随手改一条"，不是"有备而来的重算"。
+
+GENESIS_HASH = "0" * 64
+
+
+def _entry_payload(prev_hash, ts, username, method, success, similarity, detail):
+    """把一条审计事件序列化成确定性的字节串（同一行永远得到同一结果）。
+
+    用 \\x1f 当分隔符，避免字段内容里恰好有分隔符导致不同记录哈希相同。
+    浮点用 repr 而非格式化：repr 是往返精确的，重新读回来后必然一致。
+    """
+    return "\x1f".join([
+        prev_hash or "",
+        repr(float(ts)),
+        username or "",
+        method or "",
+        "1" if success else "0",
+        "" if similarity is None else repr(float(similarity)),
+        detail or "",
+    ])
+
+
+def _hash_entry(prev_hash, ts, username, method, success, similarity, detail):
+    payload = _entry_payload(prev_hash, ts, username, method, success, similarity, detail)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _migrate_audit_chain(conn):
+    """首次升级到此版本时，给历史记录补算哈希链。
+
+    只在**列刚被创建出来的这一次**回填。之后无论出现什么情况都不再自动重算 ——
+    否则"启动时自动修复链条"就等于把篡改也一并修好，反而抹掉了证据。
+    """
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(login_events)")}
+    if "entry_hash" in cols:
+        return 0
+    conn.execute("ALTER TABLE login_events ADD COLUMN prev_hash TEXT")
+    conn.execute("ALTER TABLE login_events ADD COLUMN entry_hash TEXT")
+
+    rows = conn.execute(
+        "SELECT id, ts, username, method, success, similarity, detail "
+        "FROM login_events ORDER BY id"
+    ).fetchall()
+    prev = GENESIS_HASH
+    for row in rows:
+        entry = _hash_entry(prev, row["ts"], row["username"], row["method"],
+                            row["success"], row["similarity"], row["detail"])
+        conn.execute("UPDATE login_events SET prev_hash = ?, entry_hash = ? WHERE id = ?",
+                     (prev, entry, row["id"]))
+        prev = entry
+    return len(rows)
+
 
 def add_event(username, method, success, similarity=None, detail=None):
+    ts = time.time()
     with connect() as conn:
+        # BEGIN IMMEDIATE：先拿到写锁再读链尾。否则两个线程可能都读到同一个
+        # 链尾、各接一支，链条就分叉了（推流线程与登录线程是真并发）。
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT entry_hash FROM login_events ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        prev = (row["entry_hash"] if row and row["entry_hash"] else None) or GENESIS_HASH
+        entry = _hash_entry(prev, ts, username, method, success, similarity, detail)
         conn.execute(
-            "INSERT INTO login_events(ts, username, method, success, similarity, detail) "
-            "VALUES(?, ?, ?, ?, ?, ?)",
-            (time.time(), username, method, 1 if success else 0, similarity, detail),
+            "INSERT INTO login_events(ts, username, method, success, similarity, "
+            "                        detail, prev_hash, entry_hash) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+            (ts, username, method, 1 if success else 0, similarity, detail, prev, entry),
         )
+
+
+def verify_audit_chain():
+    """校验链条完整性。**只读**：发现问题只报告，绝不自动修复。
+
+    返回 (是否完好, 详情)。详情里带失败原因与断点 id，
+    便于 tools/verify_audit_chain.py 定位到具体是哪一条被动过。
+    """
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT id, ts, username, method, success, similarity, detail, "
+            "       prev_hash, entry_hash FROM login_events ORDER BY id"
+        ).fetchall()
+
+    prev = GENESIS_HASH
+    checked = 0
+    for row in rows:
+        if (row["prev_hash"] or "") != prev:
+            return False, {"checked": checked, "broken_at": row["id"],
+                           "reason": "prev_hash_mismatch",
+                           "expected": prev[:16], "found": (row["prev_hash"] or "")[:16]}
+        expect = _hash_entry(prev, row["ts"], row["username"], row["method"],
+                             row["success"], row["similarity"], row["detail"])
+        if row["entry_hash"] != expect:
+            return False, {"checked": checked, "broken_at": row["id"],
+                           "reason": "entry_hash_mismatch",
+                           "expected": expect[:16], "found": (row["entry_hash"] or "")[:16]}
+        prev = expect
+        checked += 1
+    return True, {"checked": checked, "head": prev}
 
 
 def recent_events(limit=20, username=None):

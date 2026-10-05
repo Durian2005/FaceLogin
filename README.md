@@ -15,6 +15,10 @@
 > - 相似度阈值默认 `0.50`，是经验值，**尚未用真实样本校准**（测误接受率需要他人样本）。
 > - 登录接口会返回相似度数值 —— 这是**刻意为之**，便于校准阈值，**生产环境不应如此**。
 > - 服务使用 Flask 开发服务器，只监听 `127.0.0.1`，**不要暴露到公网**。
+> - 服务会校验请求的 `Host` 与 `Origin`：本机上的其它网页**拿不到摄像头画面**
+>   （`/api/stream` 另有每进程随机令牌），也**关不掉服务**。完整的攻击面、
+>   缓解措施与**残余风险**见 **[THREAT_MODEL.md](THREAT_MODEL.md)** ——
+>   那份文档同样写清了「明确防不住什么」。
 >
 > 如果你需要能抵御**呈现攻击**（presentation attack）的方案，本项目**不是**：
 > 它只有一层轻量动作挑战，缺少真正的活体检测、深度伪造检测等必要环节。这里实现的是
@@ -180,12 +184,14 @@ FaceLogin/
 ├─ 打包.bat                  打包成免安装的 Windows 文件夹
 ├─ 使用教程.md               分步使用说明（先看这个）
 ├─ README.md                 本文件
+├─ THREAT_MODEL.md           威胁模型：资产、攻击面、缓解、残余风险
 ├─ LICENSE                   本项目代码与文档的 MIT 许可证
 ├─ requirements.txt          运行依赖
-├─ requirements-dev.txt      仅打包/开发需要的依赖（PyInstaller）
+├─ requirements-dev.txt      仅打包/评测需要的依赖（PyInstaller、pyarrow）
 ├─ app/
-│  ├─ server.py              路由、会话、锁定与审计（服务层）
-│  ├─ db.py                  SQLite 存储层
+│  ├─ server.py              路由、会话、锁定、审计、请求来源校验（服务层）
+│  ├─ reqguard.py            Host 白名单 / Origin 校验 / 每进程页面令牌
+│  ├─ db.py                  SQLite 存储层（审计日志带哈希链）
 │  ├─ security.py            密码哈希与登录策略
 │  ├─ face.py                人脸检测、对齐、特征、比对、头姿代理值
 │  ├─ liveness.py            活体检测：随机动作挑战与姿态采样判定
@@ -195,7 +201,8 @@ FaceLogin/
 │  └─ run.py                 启动入口（自动开浏览器）
 ├─ models/                   人脸模型 + 第三方许可证（见 models/README.md）
 ├─ data/faces.db             用户、人脸模板、审计（自动生成，不入库）
-├─ tools/                    验证、诊断、模型下载与打包脚本
+├─ docs/                     量化实验结果（阈值标定报告）
+├─ tools/                    验证、诊断、标定、模型下载与打包脚本
 ├─ dist/FaceLogin/           打包产物（自动生成，不入库）
 └─ .venv/                    Python 运行环境（自动生成，不入库）
 ```
@@ -315,17 +322,27 @@ python tools/download_models.py --no-proxy # 系统代理失效时
 ## 自测
 
 ```
-.venv\Scripts\python.exe tools\test_storage.py     # 存储层
-.venv\Scripts\python.exe tools\test_liveness.py    # 活体检测
+.venv\Scripts\python.exe tools\test_security.py       # 安全加固（离线，49 项）
+.venv\Scripts\python.exe tools\test_storage.py        # 存储层（21 项）
+.venv\Scripts\python.exe tools\test_liveness.py       # 活体检测（47 项）
+.venv\Scripts\python.exe tools\verify_audit_chain.py  # 审计链完整性（只读）
 ```
 
+- `test_security.py` —— 49 项断言，**全离线、不打开摄像头、不碰正式数据库**
+  （`FACELOGIN_DATA` 自动指向临时目录，`face` 模块用桩替换，所以不会加载模型）：
+  Host 白名单（含「看起来像 localhost 的域名」这种绕过尝试）、
+  Origin/Referer 校验（含 `Origin: null` 与「同主机不同端口」）、页面令牌、
+  阈值降级必须验口令、以及审计链的篡改检出与**断点定位**。
 - `test_storage.py` —— 用户创建与去重、密码校验、模板数量上限、失败锁定、审计读写、
   模板与用户删除等 21 项断言。
 - `test_liveness.py` —— 47 项断言，**完全离线、确定性**：姿态代理值的数学（用合成关键点）、
   挑战票据的一次性/过期/会话绑定/随机性、以及采样状态机的全部路径（成功、方向做反、
   幅度不足、不回正、无人脸、画面突变、有效帧不足）。不打开摄像头、不需要真人样本。
+- `verify_audit_chain.py` —— 逐条重算审计日志的哈希链，只读、不自动修复。
+  退出码 `0` = 链条完好，`1` = 检测到篡改并打印断点 id 与原因。
 
-两个脚本默认都写 `data\faces.db`；想用临时库测试，先设 `FACELOGIN_DATA` 指向其他目录。
+这些脚本默认写 `data\faces.db`；想用临时库测试，先设 `FACELOGIN_DATA` 指向其他目录
+（`test_security.py` 自己会设，不用管）。
 
 **真机校准与方向核对**（需要真人配合，约 30 秒）：
 
