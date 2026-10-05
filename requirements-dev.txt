@@ -9,3 +9,7 @@
 
 # 打包成免安装的 Windows 文件夹，见 tools/build_exe.py 与项目根的「打包.bat」
 pyinstaller==6.22.3
+
+# 阈值标定实验用（tools/eval_threshold.py 读 LFW 的 parquet）。
+# 体积不小，但**只在跑量化评测时需要** —— 程序运行、打包产物都不依赖它。
+pyarrow==25.0.1

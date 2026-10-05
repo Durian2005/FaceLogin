@@ -28,7 +28,7 @@ _MOUTH_A, _MOUTH_B = slice(10, 12), slice(12, 14)
 
 
 class FaceEngine:
-    def __init__(self):
+    def __init__(self, open_camera=True):
         # 先用**原始路径**判断文件在不在，这样报错信息对用户是可操作的
         missing = [p for p in (DETECTOR_SRC, RECOGNIZER_SRC) if not os.path.exists(p)]
         if missing:
@@ -42,16 +42,24 @@ class FaceEngine:
         # OpenCV 的 DetectorYN / RecognizerSF 实例不保证线程安全，而 MJPEG 推流线程
         # 与登录/录入/活体采样线程会同时用到它们 —— 不加锁属于潜在的随机崩溃。
         self.model_lock = threading.Lock()
-        self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
+        # open_camera=False 用于**批量离线评测**（tools/eval_threshold.py 要跑几千张
+        # LFW 图片）。那些场景只需要检测与特征提取，没有理由占住摄像头 ——
+        # 否则跑一次评测就会把摄像头指示灯点亮，还可能和正在用的程序抢设备。
+        self.cap = None
+        if open_camera:
+            self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
     # ------------------------------------------------------------ camera
 
     def camera_ready(self):
-        return bool(self.cap.isOpened())
+        return bool(self.cap is not None and self.cap.isOpened())
 
     def read_frame(self):
+        if self.cap is None:
+            return None
         with self.camera_lock:
             ok, frame = self.cap.read()
         return frame if ok else None
