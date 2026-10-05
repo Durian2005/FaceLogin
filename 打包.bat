@@ -36,6 +36,23 @@ if errorlevel 1 (
 )
 
 echo.
+echo ==============================================================
+echo   Verifying the packaged build  (real HTTP probes)
+echo ==============================================================
+echo.
+
+"%PY%" "%~dp0tools\smoke_frozen.py"
+
+if errorlevel 1 (
+  echo.
+  echo [ERROR] Packaged build FAILED verification.
+  echo         The package is not trustworthy - do not distribute it.
+  echo         See the probe results above.
+  pause
+  exit /b 1
+)
+
+echo.
 echo Output folder: dist\FaceLogin
 echo Double-click FaceLogin.exe there to run.
 pause
