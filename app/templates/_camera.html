@@ -1,0 +1,25 @@
+<!-- 摄像头卡片：欢迎 / 登录 / 录入 三页共用。
+     独立成文件是为了让"哪些 id 属于摄像头"这件事只有一个出处 ——
+     校验脚本扫描模板时能直接看到它们。 -->
+<section class="card">
+  <div class="card-head">
+    <h2>实时画面</h2>
+    <span class="badge" id="badge-cam">{{ cam_note|default('本机摄像头') }}</span>
+  </div>
+  <div class="cam">
+    <img id="stream" alt="摄像头实时画面">
+    {% if show_guide %}<div class="guide" aria-hidden="true"></div>{% endif %}
+    <span class="cam-tag" id="camtag"><i></i><span id="camtag-tx">检测中</span></span>
+    <div class="live" id="live" hidden>
+      <b id="live-tx">动作挑战</b>
+      <span class="lsub" id="live-sub">请按提示完成动作</span>
+      <div class="lbar"><i id="live-bar"></i></div>
+    </div>
+  </div>
+  <div class="metrics">
+    <div class="metric"><span>检测结果</span><b id="det">-</b></div>
+    <div class="metric"><span>相似度阈值</span><b id="thr">-</b></div>
+    <div class="metric"><span>口令哈希</span><b id="pwd">-</b></div>
+    <div class="metric"><span>活体检测</span><b id="livemode">-</b></div>
+  </div>
+</section>

@@ -1,0 +1,169 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<main class="page">
+  <div class="grid">
+
+    <div class="col">
+      {% include "_camera.html" %}
+    </div>
+
+    <div class="col">
+      <section class="card">
+        <div class="card-head">
+          <h2>第 3 步 · 登录验证</h2>
+          <span class="badge" id="badge-session">未登录</span>
+        </div>
+
+        <label for="lu">用户名</label>
+        <input id="lu" placeholder="请输入用户名" autocomplete="username" autofocus>
+        <label for="lp">密码<span style="color:var(--tx-3)">（只走密码登录时才需要填）</span></label>
+        <input id="lp" type="password" placeholder="人脸登录不必填" autocomplete="current-password">
+
+        <p class="nextstep" id="acctstate">正在读取状态…</p>
+
+        <div class="actions">
+          <button class="btn btn-primary" id="btn-face" data-busy="等待你完成动作…" onclick="loginFace(this)">人脸登录</button>
+          <button class="btn" id="btn-pw" data-busy="正在校验…" onclick="loginPassword(this)">密码登录</button>
+        </div>
+
+        <!-- 动作挑战的准备阶段：基线帧是在 /api/liveness/start 之后才采的，
+             一收到指令就转头会把基线采成侧脸。所以先停一下，等人站好。 -->
+        <div class="prep" id="prep" hidden>
+          <b>先站稳，再开始</b>
+          <p>
+            请先<b>正对摄像头、保持不动约 1 秒</b> —— 系统要先取一张正面基准帧，
+            然后才出动作指令。动作做不出来不计失败次数，可以放心重试。
+          </p>
+          <div class="actions">
+            <button class="btn btn-primary" id="btn-prep" data-busy="等待你完成动作…"
+                    onclick="startChallenge(this)">我准备好了，开始挑战</button>
+            <button class="btn" onclick="cancelPrep()">取消</button>
+          </div>
+        </div>
+
+        <p class="hint">
+          人脸登录 = <b>账号先行 + 1:1 比对</b>，只与本人模板比对，不遍历所有用户。
+          {% if liveness %}
+          验证过程需要完成一次随机动作挑战 —— 这能挡住静态照片和事先录好的视频，
+          但<b>挡不住实时配合旋转的照片或屏幕回放</b>。
+          {% else %}
+          ⚠ 本机已用 <code>FACELOGIN_LIVENESS=0</code> 关闭活体检测，人脸登录退化成
+          「直接比对一次」，<b>对照片不设防</b>，仅用于自测。
+          {% endif %}
+          密码登录可随时回退。
+        </p>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>没有账号？</h2></div>
+        <p class="hint" style="margin-top:0">
+          这套系统没有"找回账号"功能，账号名记不住就只能重新创建一个。
+        </p>
+        <div class="actions">
+          <a class="btn" href="/register">去创建账号</a>
+        </div>
+      </section>
+    </div>
+
+  </div>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* ---------------- 活体动作挑战浮层 ---------------- */
+let liveTimer = null;
+function showLive(actionText, hint, timeout){
+  $('live-tx').textContent = actionText;
+  $('live-sub').textContent = hint || '请按提示完成动作';
+  $('live-bar').style.width = '0%';
+  $('live').hidden = false;
+  const t0 = Date.now();
+  const total = Math.max(1, timeout || 8) * 1000;
+  clearInterval(liveTimer);
+  liveTimer = setInterval(() => {
+    $('live-bar').style.width = Math.min(100, (Date.now() - t0) / total * 100) + '%';
+  }, 80);
+}
+function hideLive(){
+  clearInterval(liveTimer); liveTimer = null;
+  $('live').hidden = true;
+  $('live-bar').style.width = '0%';
+}
+
+/* 人脸登录的返回文案（两条链路共用：动作挑战后比对 / 关闭活体时直接比对） */
+function faceResultText(r){
+  const extra = r.cosine !== undefined
+    ? '（相似度 ' + r.cosine + ' / 阈值 ' + r.threshold + '，' + Math.round(r.ms || 0) + 'ms）'
+    : '';
+  return textOf(r) + extra;
+}
+
+let pendingUser = '';
+
+function cancelPrep(){
+  $('prep').hidden = true;
+  pendingUser = '';
+}
+
+/* 点击「人脸登录」只进入准备阶段 —— 真正的挑战从这里才开始计时。 */
+function loginFace(btn){
+  const username = $('lu').value.trim();
+  if (!username){ toast('请先填写用户名', 'warn'); return; }
+  pendingUser = username;
+  $('prep').hidden = false;
+  const b = $('btn-prep');
+  if (b) b.focus();
+}
+
+function startChallenge(btn){ guard(async () => {
+  const username = pendingUser || $('lu').value.trim();
+  if (!username){ toast('请先填写用户名', 'warn'); return; }
+  $('prep').hidden = true;
+
+  const s = await post('/api/liveness/start', {});
+
+  if (!s.ok && s.error === 'liveness_disabled'){
+    // 服务端关掉了活体检测：退回直接比对，保持可用
+    const r = await post('/api/login/face', {username: username});
+    toast(faceResultText(r), toneOf(r));
+    if (r.ok) go('/console');
+    return;
+  }
+  if (!s.ok){ toast(textOf(s), 'bad'); return; }
+
+  showLive(s.action_text, s.hint, s.timeout);
+  let r;
+  try {
+    r = await post('/api/liveness/verify', {challenge_id: s.challenge_id, username: username});
+  } finally {
+    hideLive();
+  }
+  toast(faceResultText(r), toneOf(r));
+  if (r.ok) go('/console');
+}, btn); }
+
+function loginPassword(btn){ guard(async () => {
+  const r = await post('/api/login/password',
+                       {username: $('lu').value.trim(), password: $('lp').value});
+  toast(textOf(r), toneOf(r));
+  if (r.ok){ $('lp').value = ''; go('/console'); }
+}, btn); }
+
+function onState(s){
+  const acc = $('acctstate');
+  if (!acc) return;
+  if (s.logged_in){
+    acc.textContent = '已登录为 ' + s.username + '，正在进入主控台…';
+    acc.className = 'nextstep ok';
+  } else if (s.has_any_user){
+    acc.textContent = '本机已有账号 —— 填用户名后点「人脸登录」，或填密码点「密码登录」';
+    acc.className = 'nextstep warn';
+  } else {
+    acc.textContent = '本机还没有任何账号 —— 请先去「创建账号」';
+    acc.className = 'nextstep warn';
+  }
+}
+</script>
+{% endblock %}

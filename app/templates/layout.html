@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
-<!-- 页面令牌由服务端注入（server.render_page）。摄像头画面与关页通知都靠它，
-     这样即使是本机上的其它网页，也拿不到画面、关不掉服务。 -->
-<meta name="page-token" content="<!--PAGETOKEN-->">
-<title>本地人脸识别登录</title>
+<!-- 页面令牌由服务端渲染时注入（server.render_page）。摄像头画面与关页通知都
+     靠它，这样即便是本机上的其它网页，也拿不到画面、关不掉服务。 -->
+<meta name="page-token" content="{{ token }}">
+<title>{{ title }} · 本地人脸识别登录</title>
 <style>
 /* ============================================================
-   单文件模板：全部样式内联，不依赖任何 CDN 或构建工具
+   多文件模板，公共外壳在这里：样式全部内联，不依赖任何 CDN 或构建工具
    —— 保证离线可用、clone 下来双击即可运行
    ============================================================ */
 :root{
@@ -50,7 +50,7 @@ h1,h2{margin:0;font-weight:600}
 /* ---------------- 顶栏 ---------------- */
 .topbar{
   display:flex;align-items:flex-start;justify-content:space-between;
-  gap:18px;flex-wrap:wrap;margin-bottom:20px;
+  gap:18px;flex-wrap:wrap;margin-bottom:18px;
 }
 .brand{display:flex;align-items:center;gap:13px}
 .logo{
@@ -75,7 +75,28 @@ h1{font-size:19px;letter-spacing:.01em}
 .chip.exit i{background:var(--warn);animation:beat 2.4s ease-in-out infinite}
 @keyframes beat{0%,100%{opacity:1}50%{opacity:.3}}
 
+/* ---------------- 步骤条 ----------------
+   真分页之后，"我在第几步"由服务端渲染 —— 它是导航，不是装饰 */
+.steps{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 18px}
+.step{
+  display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--tx-3);
+  padding:6px 12px;border-radius:999px;
+  border:1px solid var(--border);background:var(--surface);
+}
+.step i{
+  display:grid;place-items:center;width:16px;height:16px;border-radius:50%;flex:none;
+  font-size:10px;font-style:normal;background:rgba(255,255,255,.1);color:var(--tx-2);
+}
+.step.now{color:var(--tx);border-color:rgba(56,189,248,.5);background:rgba(56,189,248,.1)}
+.step.now i{background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#06121b;font-weight:700}
+.step.done{color:#a7f3d0;border-color:rgba(52,211,153,.35);background:rgba(52,211,153,.08)}
+.step.done i{background:rgba(52,211,153,.85);color:#06121b;font-weight:700}
+.steparw{color:var(--tx-3);font-size:13px}
+
 /* ---------------- 布局 ---------------- */
+main{display:block}
+.page{max-width:1180px;margin:0 auto}
+.narrow{max-width:620px;margin:0 auto}
 .grid{
   display:grid;
   grid-template-columns:minmax(0,1.28fr) minmax(0,1fr);
@@ -100,6 +121,7 @@ h1{font-size:19px;letter-spacing:.01em}
 }
 .card-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:13px}
 .card h2{font-size:13.5px;color:#dbe5ef;letter-spacing:.01em}
+.card + .card{margin-top:16px}
 
 /* ---------------- 摄像头 ---------------- */
 .cam{position:relative;border-radius:12px;overflow:hidden;background:#04070a;border:1px solid var(--border);min-height:220px}
@@ -114,6 +136,12 @@ h1{font-size:19px;letter-spacing:.01em}
 .cam-tag i{width:6px;height:6px;border-radius:50%;background:var(--tx-3);flex:none}
 .cam-tag.hit{color:#a7f3d0;border-color:rgba(52,211,153,.4)}
 .cam-tag.hit i{background:var(--ok);animation:beat 1.6s ease-in-out infinite}
+/* 正脸取景框：录入选样时的视觉引导 */
+.cam .guide{
+  position:absolute;left:50%;top:46%;width:44%;aspect-ratio:3/4;
+  transform:translate(-50%,-50%);pointer-events:none;
+  border:2px dashed rgba(56,189,248,.5);border-radius:50% / 44%;
+}
 
 /* ---------------- 活体挑战浮层（叠在画面底部）---------------- */
 .live{
@@ -168,6 +196,7 @@ input[type=number]{font-variant-numeric:tabular-nums}
   color:var(--tx);border:1px solid var(--border-2);background:rgba(255,255,255,.055);
   transition:background .18s,border-color .18s,transform .1s,filter .18s;
 }
+a.btn{display:inline-flex;align-items:center;text-decoration:none}
 .btn:hover{background:rgba(255,255,255,.105)}
 .btn:active{transform:translateY(1px)}
 .btn:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(56,189,248,.22)}
@@ -200,7 +229,7 @@ input:disabled{opacity:.5;cursor:not-allowed}
 @keyframes spin{to{transform:rotate(360deg)}}
 
 /* ---------------- 下一步引导条 ----------------
-   全页唯一一个"你现在该做什么"，替代散落各处的零碎提示 */
+   每张页面唯一一个"你现在该做什么"，替代散落各处的零碎提示 */
 .nextstep{
   display:flex;align-items:flex-start;gap:8px;
   margin:13px 0 0;padding:9px 11px;border-radius:10px;
@@ -216,11 +245,37 @@ input:disabled{opacity:.5;cursor:not-allowed}
 .nextstep.ok{border-color:rgba(52,211,153,.3);background:rgba(52,211,153,.06);color:#a7f3d0}
 .nextstep.ok::before{background:var(--ok)}
 
+/* ---------------- 入口选择卡（欢迎页）---------------- */
+.choice{display:grid;gap:10px;margin-top:13px}
+.choice-link{
+  display:block;padding:13px 15px;border-radius:12px;text-decoration:none;color:inherit;
+  border:1px solid var(--border-2);background:rgba(255,255,255,.04);
+  transition:border-color .18s,background .18s,transform .18s;
+}
+.choice-link:hover{border-color:rgba(56,189,248,.5);background:rgba(56,189,248,.08);transform:translateY(-1px)}
+.choice-link b{display:block;font-size:14px}
+.choice-link span{display:block;margin-top:3px;font-size:12px;color:var(--tx-3)}
+.choice-link.primary{border-color:transparent;background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#06121b}
+.choice-link.primary span{color:rgba(6,18,27,.72)}
+
+/* ---------------- 准备阶段面板（人脸登录前）---------------- */
+.prep{margin-top:13px;padding:12px 13px;border-radius:12px;
+  border:1px solid rgba(56,189,248,.35);background:rgba(56,189,248,.08)}
+.prep[hidden]{display:none}
+.prep b{display:block;font-size:13px;color:#bae6fd}
+.prep p{margin:5px 0 0;font-size:12px;color:var(--tx-2)}
+
+/* ---------------- 采集进度条 ---------------- */
+.progress{height:6px;border-radius:999px;background:rgba(255,255,255,.1);overflow:hidden;margin-top:12px}
+.progress i{display:block;height:100%;width:0;border-radius:999px;
+  background:linear-gradient(90deg,var(--accent),var(--accent-2));transition:width .25s}
+
 /* ---------------- 提示文字 ---------------- */
 .hint{font-size:12px;color:var(--tx-3);line-height:1.65;margin:11px 0 0}
+code{font-size:11.5px;padding:1px 5px;border-radius:5px;background:rgba(255,255,255,.07);color:var(--tx-2)}
 
 /* ---------------- 危险操作折叠 ---------------- */
-.danger{margin-top:14px;border:1px solid rgba(248,113,113,.2);border-radius:12px;background:rgba(248,113,113,.045);padding:0 13px}
+.danger{margin-top:6px;border:1px solid rgba(248,113,113,.2);border-radius:12px;background:rgba(248,113,113,.045);padding:0 13px}
 .danger summary{
   cursor:pointer;list-style:none;padding:10px 0;
   font-size:12px;color:#fca5a5;display:flex;align-items:center;gap:7px;
@@ -262,7 +317,7 @@ td.empty{text-align:center;color:var(--tx-3);padding:18px 9px;white-space:normal
 @keyframes toast-in{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
 </style>
 </head>
-<body>
+<body data-stage="{{ stage }}">
 
 <header class="topbar">
   <div class="brand">
@@ -279,128 +334,45 @@ td.empty{text-align:center;color:var(--tx-3);padding:18px 9px;white-space:normal
     </div>
   </div>
   <div class="topbar-side">
-    <span class="chip"><i></i>本机回环 127.0.0.1:5000 · 数据不出本机</span>
-    <!--AUTOEXIT-->
+    <span class="chip"><i></i>本机回环 127.0.0.1:{{ port }} · 数据不出本机</span>
+    {% if auto_exit %}
+    <span class="chip exit"><i></i>关闭本页约 {{ grace_text }} 秒后自动停止服务并释放摄像头</span>
+    {% endif %}
   </div>
 </header>
 
-<main class="grid">
+<nav class="steps" aria-label="上手流程">
+{% for s in steps %}
+  <span class="step {{ s.state }}"><i>{{ "✓" if s.state == "done" else s.index }}</i>{{ s.label }}</span>
+  {% if not loop.last %}<span class="steparw" aria-hidden="true">›</span>{% endif %}
+{% endfor %}
+</nav>
 
-  <div class="col">
-    <section class="card">
-      <div class="card-head">
-        <h2>实时画面</h2>
-      </div>
-      <div class="cam">
-        <img id="stream" alt="摄像头实时画面">
-        <span class="cam-tag" id="camtag"><i></i><span id="camtag-tx">检测中</span></span>
-        <div class="live" id="live" hidden>
-          <b id="live-tx">动作挑战</b>
-          <span class="lsub" id="live-sub">请按提示完成动作</span>
-          <div class="lbar"><i id="live-bar"></i></div>
-        </div>
-      </div>
-      <div class="metrics">
-        <div class="metric"><span>检测结果</span><b id="det">-</b></div>
-        <div class="metric"><span>相似度阈值</span><b id="thr">-</b></div>
-        <div class="metric"><span>口令哈希</span><b id="pwd">-</b></div>
-        <div class="metric"><span>活体检测</span><b id="livemode">-</b></div>
-      </div>
-    </section>
-
-    <section class="card">
-      <div class="card-head">
-        <h2>登录状态</h2>
-        <span class="badge" id="badge-session">未登录</span>
-      </div>
-      <div class="metrics">
-        <div class="metric mt-lg"><span>当前用户</span><b id="who">未登录</b></div>
-        <div class="metric mt-lg"><span>人脸模板</span><b id="samples">0 组</b></div>
-      </div>
-      <p class="nextstep" id="nextstep">正在读取状态…</p>
-      <div class="actions">
-        <button class="btn btn-primary" id="btn-enroll" data-busy="正在采集 3 组…" onclick="enroll(this)">录入人脸</button>
-        <button class="btn" id="btn-logout" data-busy="正在退出…" onclick="logout(this)">退出登录</button>
-      </div>
-      <details class="danger">
-        <summary>删除我的人脸数据</summary>
-        <p class="hint">人脸模板属于敏感生物特征信息。删除后该账号将无法再用人脸登录，只能改用密码。此操作需要再次输入密码确认。</p>
-        <label for="delpwd">密码</label>
-        <input id="delpwd" type="password" placeholder="输入当前账号的密码" autocomplete="current-password">
-        <div class="actions">
-          <button class="btn btn-danger btn-sm" id="btn-del" data-busy="正在删除…" onclick="deleteFace(this)">确认删除全部模板</button>
-        </div>
-      </details>
-    </section>
-  </div>
-
-  <div class="col">
-    <section class="card">
-      <div class="card-head"><h2>登录</h2></div>
-      <label for="lu">用户名</label>
-      <input id="lu" placeholder="请输入用户名" autocomplete="username" autofocus>
-      <label for="lp">密码</label>
-      <input id="lp" type="password" placeholder="密码登录时填写" autocomplete="current-password">
-      <div class="actions">
-        <button class="btn btn-primary" id="btn-face" data-busy="等待你完成动作…" onclick="loginFace(this)">人脸登录</button>
-        <button class="btn" id="btn-pw" data-busy="正在校验…" onclick="loginPassword(this)">密码登录</button>
-      </div>
-      <p class="nextstep" id="acctstate">正在读取状态…</p>
-      <p class="hint">人脸登录为「账号先行 + 1:1 比对」，只与本人模板比对，无需遍历所有用户。登录时需按提示完成一次随机动作挑战 —— 这条能挡住静态照片和事先录好的视频，但挡不住实时配合旋转的照片或屏幕回放。密码登录可随时回退。</p>
-    </section>
-
-    <section class="card">
-      <div class="card-head"><h2>注册新账号</h2></div>
-      <label for="ru">用户名</label>
-      <input id="ru" placeholder="3–32 位字母、数字、下划线" autocomplete="off">
-      <label for="rp">密码</label>
-      <input id="rp" type="password" placeholder="至少 6 位" autocomplete="new-password">
-      <div class="actions">
-        <button class="btn btn-primary" id="btn-reg" data-busy="正在创建…" onclick="register(this)">注册并登录</button>
-      </div>
-      <p class="hint">注册成功后请立刻录入人脸，否则该账号只能使用密码登录。</p>
-    </section>
-
-    <section class="card">
-      <div class="card-head">
-        <h2>阈值校准</h2>
-        <span class="badge" id="badge-thr">-</span>
-      </div>
-      <label for="thrv">相似度阈值</label>
-      <input id="thrv" type="number" step="0.01" min="0.2" max="0.95" value="0.5">
-      <label for="thrpwd">密码（仅调低阈值时必填）</label>
-      <input id="thrpwd" type="password" placeholder="调低阈值等于放宽认人条件" autocomplete="current-password">
-      <div class="actions">
-        <button class="btn" id="btn-thr" data-busy="正在更新…" onclick="setThreshold(this)">更新阈值</button>
-      </div>
-      <p class="hint">阈值越高越严格。<b>调低阈值会放宽人脸判定，需要输入密码确认</b>；调高不设门槛。量化依据见 <code>docs/threshold-report.md</code>。</p>
-    </section>
-
-    <section class="card">
-      <div class="card-head">
-        <h2>审计记录</h2>
-        <span class="badge" id="badge-audit">登录后可见</span>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>时间</th><th>方式</th><th>结果</th><th>相似度</th><th>说明</th></tr></thead>
-          <tbody id="audit"><tr><td colspan="5" class="empty">请先登录 —— 登录后可查看自己的注册、登录、锁定、录入记录</td></tr></tbody>
-        </table>
-      </div>
-    </section>
-  </div>
-
-</main>
+{% block content %}{% endblock %}
 
 <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
 
 <script>
+/* ============================================================
+   所有页面共用的脚本：提示、请求封装、状态轮询、跳转与"关页即停"
+   页面自己的逻辑写在各自的 scripts 块里，只需要实现一个 onState(s) 函数
+   来消费状态。注入值一律走 HTML（meta / 可见文本），**不写进 script**
+   —— 这样内联 JS 始终是纯静态文本，node --check 还能继续当语法门禁。
+   ============================================================ */
 const $ = id => document.getElementById(id);
 
 /* 页面令牌：服务端渲染时注入到 <meta>。摄像头画面与关页通知都靠它 ——
    这样即便是本机上的其它网页，也拿不到画面、关不掉服务。 */
 const PAGE_TOKEN = (document.querySelector('meta[name="page-token"]') || {}).content || '';
-$('stream').src = '/api/stream?t=' + encodeURIComponent(PAGE_TOKEN);
+
+/* 只有需要"看见自己"的页面才有 <img id="stream">；没有就不请求画面。 */
+function bindStream(bust){
+  const img = $('stream');
+  if (!img) return;
+  img.src = '/api/stream?t=' + encodeURIComponent(PAGE_TOKEN)
+          + (bust ? '&n=' + Date.now() : '');
+}
+bindStream(false);
 
 /* ---------------- 结果提示 ---------------- */
 function toast(text, cls){
@@ -450,6 +422,14 @@ async function guard(fn, btn){
   }
 }
 
+/* 在长操作过程中更新按钮上的文案（例如"正在采集第 2/3 组…"）——
+   进度必须是真的，所以由调用方按实际完成的组数来报。 */
+function busyLabel(btn, text){
+  if (!btn || btn.dataset.running !== '1') return;
+  btn.dataset.busy = text;
+  btn.innerHTML = '<span class="spin"></span>' + text;
+}
+
 /* 按登录态解锁 / 锁定入口。
    锁定时把原因写进 title —— 让用户不必"点一下才知道做不了"。
    正在执行中的按钮跳过：否则 2 秒一次的状态轮询会把它"解锁"回来。 */
@@ -464,19 +444,19 @@ const toneOf = r => r.ok ? 'ok' : (r.error === 'locked' ? 'warn' : 'bad');
 
 /* ---------------- 错误码 → 中文 ----------------
    后端有一部分响应只带 error 码、不带 message（最典型的是未登录时的
-   `login_required`）。原先的 `r.message || r.error` 会把这串英文码直接
-   甩给用户，用户看到 "login_required" 完全不知道下一步该做什么。
+   `login_required`）。`r.message || r.error` 会把这串英文码直接甩给用户，
+   用户看到 "login_required" 完全不知道下一步该做什么。
    这里统一兜底成「能照着做」的中文。message 优先，没有才查这张表。 */
 const ERR_TEXT = {
-  login_required:      '这一步需要先登录 —— 请先在右侧「登录」或「注册新账号」',
-  invalid_value:       '阈值请填一个数字（0.20 – 0.95）',
+  login_required:      '这一步需要先登录 —— 请先登录后再继续',
+  invalid_value:       '请填一个合法数字',
   out_of_range:        '阈值请设在 0.20 到 0.95 之间',
   missing_field:       '请把必填项填写完整',
   bad_token:           '页面凭证已失效，请刷新页面后重试',
-  bad_host:            '请求来源不被允许，请用 127.0.0.1:5000 打开本页',
+  bad_host:            '请求来源不被允许，请用 127.0.0.1 打开本页',
   bad_origin:          '请求来源不被允许，请刷新页面后重试',
   no_face_detected:    '没有检测到人脸 —— 请正对摄像头、光线均匀，画面里只留一张脸',
-  no_template:         '这个账号还没有录入人脸，请先登录后在左侧「录入人脸」',
+  no_template:         '这个账号还没有录入人脸，请先去「录入人脸」',
   camera_read_failed:  '读取摄像头失败，请检查摄像头是否被其它程序占用',
   password_required:   '这一步需要输入密码确认',
   liveness_required:   '已开启活体检测，请点「人脸登录」完成动作挑战',
@@ -490,193 +470,94 @@ const ERR_TEXT = {
 const textOf = r => r.message || ERR_TEXT[r.error]
   || ('操作未完成（' + (r.error || '未知错误') + '）');
 
-/* ---------------- 业务动作 ---------------- */
-function register(btn){ guard(async () => {
-  const r = await post('/api/register', {username: $('ru').value.trim(), password: $('rp').value});
-  toast(textOf(r), toneOf(r));
-  if (r.ok){
-    $('lu').value = r.username;   // 回填用户名，用户接着登录时不用再敲一遍
-    $('rp').value = '';           // 注册密码不再留在输入框里
-  }
-}, btn); }
-
-function loginPassword(btn){ guard(async () => {
-  const r = await post('/api/login/password', {username: $('lu').value.trim(), password: $('lp').value});
-  toast(textOf(r), toneOf(r));
-  if (r.ok) $('lp').value = '';
-}, btn); }
-
-/* ---------------- 活体动作挑战浮层 ---------------- */
-let liveTimer = null;
-function showLive(actionText, hint, timeout){
-  $('live-tx').textContent = actionText;
-  $('live-sub').textContent = hint || '请按提示完成动作';
-  $('live-bar').style.width = '0%';
-  $('live').hidden = false;
-  const t0 = Date.now();
-  const total = Math.max(1, timeout || 8) * 1000;
-  clearInterval(liveTimer);
-  liveTimer = setInterval(() => {
-    $('live-bar').style.width = Math.min(100, (Date.now() - t0) / total * 100) + '%';
-  }, 80);
-}
-function hideLive(){
-  clearInterval(liveTimer); liveTimer = null;
-  $('live').hidden = true;
-  $('live-bar').style.width = '0%';
-}
-/* 人脸登录的返回文案（两条链路共用：动作挑战后比对 / 关闭活体时直接比对） */
-function faceResultText(r){
-  const extra = r.cosine !== undefined
-    ? '（相似度 ' + r.cosine + ' / 阈值 ' + r.threshold + '，' + Math.round(r.ms || 0) + 'ms）'
-    : '';
-  return textOf(r) + extra;
-}
-
-function loginFace(btn){ guard(async () => {
-  const username = $('lu').value.trim();
-  if (!username){ toast('请先填写用户名', 'warn'); return; }
-
-  const s = await post('/api/liveness/start', {});
-
-  if (!s.ok && s.error === 'liveness_disabled'){
-    // 服务端关掉了活体检测：退回直接比对，保持可用
-    const r = await post('/api/login/face', {username});
-    toast(faceResultText(r), toneOf(r));
-    return;
-  }
-  if (!s.ok){ toast(textOf(s), 'bad'); return; }
-
-  showLive(s.action_text, s.hint, s.timeout);
-  let r;
-  try {
-    r = await post('/api/liveness/verify', {challenge_id: s.challenge_id, username});
-  } finally {
-    hideLive();
-  }
-  toast(faceResultText(r), toneOf(r));
-}, btn); }
-
-function enroll(btn){ guard(async () => {
-  const r = await post('/api/enroll');
-  toast(textOf(r), toneOf(r));
-}, btn); }
-
-function deleteFace(btn){ guard(async () => {
-  if (!confirm('确定删除你的人脸模板吗？删除后需重新录入才能人脸登录。')) return;
-  const r = await post('/api/face/delete', {password: $('delpwd').value});
-  toast(textOf(r), toneOf(r));
-  $('delpwd').value = '';
-}, btn); }
-
-function logout(btn){ guard(async () => {
-  const r = await post('/api/logout');
-  toast(textOf(r), 'ok');
-}, btn); }
-
-function setThreshold(btn){ guard(async () => {
-  const r = await post('/api/threshold', {
-    value: parseFloat($('thrv').value),
-    password: $('thrpwd').value
-  });
-  toast(textOf(r), toneOf(r));
-  if (r.ok) $('thrpwd').value = '';
-}, btn); }
-
 /* ---------------- 状态轮询（同时充当服务端心跳）---------------- */
-async function refresh(){
-  try {
-    const s = await (await fetch('/api/state')).json();
+function applyState(s){
+  const put = (id, text) => { const el = $(id); if (el) el.textContent = text; };
 
+  if ($('det')){
     const hit = s.faces > 0;
-    $('det').textContent = hit ? ('1 张 · ' + s.det_score) : '未检测到人脸';
+    put('det', hit ? ('1 张 · ' + s.det_score) : '未检测到人脸');
     $('det').style.color = hit ? '#a7f3d0' : '';
-    $('camtag').classList.toggle('hit', hit);
-    $('camtag-tx').textContent = hit ? '已检测到人脸' : '未检测到人脸';
-
-    $('thr').textContent = s.threshold;
-    $('badge-thr').textContent = '当前 ' + s.threshold;
-    $('pwd').textContent = s.password_backend;
-
+    if ($('camtag')) $('camtag').classList.toggle('hit', hit);
+    put('camtag-tx', hit ? '已检测到人脸' : '未检测到人脸');
+  }
+  put('thr', s.threshold);
+  put('badge-thr', '当前 ' + s.threshold);
+  put('pwd', s.password_backend);
+  if ($('livemode')){
     $('livemode').textContent = s.liveness ? '动作挑战' : '已关闭';
     $('livemode').style.color = s.liveness ? '#a7f3d0' : '#fcd34d';
-
-    $('who').textContent = s.logged_in ? s.username : '未登录';
-    $('samples').textContent = s.face_samples + ' 组';
+  }
+  put('who', s.logged_in ? s.username : '未登录');
+  put('samples', s.face_samples + ' 组');
+  if ($('badge-session')){
     $('badge-session').textContent = s.logged_in ? ('已登录 · ' + s.username) : '未登录';
     $('badge-session').classList.toggle('on', !!s.logged_in);
-
-    /* --- 入口解锁 ---
-       不满足条件的入口直接置灰，并把原因写进 title。
-       原先这些按钮未登录时照样能点，点了只会弹出一句 login_required。 */
-    const inSession = !!s.logged_in;
-    setLocked('btn-enroll', inSession, '需要先登录才能录入人脸');
-    setLocked('btn-logout', inSession, '当前未登录，无需退出');
-    setLocked('btn-del',    inSession, '需要先登录才能删除人脸数据');
-    setLocked('btn-thr',    inSession, '需要先登录才能修改阈值');
-    setLocked('thrv',       inSession, '需要先登录才能修改阈值');
-    setLocked('thrpwd',     inSession, '需要先登录才能修改阈值');
-    const delpwd = $('delpwd');
-    if (delpwd) delpwd.disabled = !inSession;
-
-    /* --- 下一步引导 ---
-       全页唯一一个"你现在该做什么"，替代原先散落在各处的零碎提示。 */
-    const samples = s.face_samples || 0;
-    const step = $('nextstep');
-    if (step){
-      if (!inSession){
-        if (s.has_any_user){
-          step.textContent = '当前未登录 —— 在右侧「登录」填用户名即可（人脸登录需先完成一次动作挑战）';
-          step.className = 'nextstep warn';
-        } else {
-          step.textContent = '本机还没有任何账号 —— 请先在右侧「注册新账号」创建一个，创建成功后会自动登录';
-          step.className = 'nextstep warn';
-        }
-      } else if (samples === 0){
-        step.textContent = '下一步：点上面的「录入人脸」采集 3 组样本 —— 完成后人脸登录才可用';
-        step.className = 'nextstep warn';
-      } else {
-        step.textContent = '已就绪：已录入 ' + samples + ' 组人脸模板，可以直接人脸登录';
-        step.className = 'nextstep ok';
-      }
-    }
-
-    /* --- 账号存在性 ---
-       只提示"有没有账号"，不回显账号名 —— 否则等于把本机账号名暴露给
-       任何能打开这个页面的人（一次免费的账号枚举）。 */
-    const acc = $('acctstate');
-    if (acc){
-      acc.textContent = s.has_any_user
-        ? '本机已有账号，直接填用户名登录即可'
-        : '本机还没有账号，请先在下方「注册新账号」创建';
-      acc.className = 'nextstep';
-    }
-
-    if (s.logged_in){
-      const a = await (await fetch('/api/audit?limit=15')).json();
-      if (a.ok){
-        $('audit').innerHTML = a.events.length
-          ? a.events.map(e =>
-              '<tr><td>' + e.time + '</td><td>' + e.method + '</td><td class="' + (e.success ? 'y' : 'n') + '">' +
-              (e.success ? '成功' : '失败') + '</td><td>' + (e.similarity ?? '-') + '</td><td>' + (e.detail || '') + '</td></tr>'
-            ).join('')
-          : '<tr><td colspan="5" class="empty">暂无记录 —— 登录、录入、动作挑战都会记在这里</td></tr>';
-        $('badge-audit').textContent = a.events.length + ' 条';
-      }
-    } else {
-      $('audit').innerHTML = '<tr><td colspan="5" class="empty">请先登录 —— 登录后可查看自己的注册、登录、锁定、录入记录</td></tr>';
-      $('badge-audit').textContent = '登录后可见';
-    }
-  } catch(e){ /* 服务正在退出时忽略 */ }
+  }
 }
 
-/* ---------------- 关闭页面 → 通知服务端退出并释放摄像头 ---------------- */
-function notifyBye(){ try { navigator.sendBeacon('/api/bye?t=' + encodeURIComponent(PAGE_TOKEN)); } catch(e){} }
-addEventListener('pagehide', notifyBye);
-addEventListener('beforeunload', notifyBye);
+async function refresh(){
+  let s;
+  try { s = await (await fetch('/api/state')).json(); }
+  catch(e){ return; }          // 服务正在退出，静默即可
+  applyState(s);
+  if (typeof onState === 'function') onState(s);
+}
 
-setInterval(refresh, 2000);
+/* ---------------- 页内跳转 ----------------
+   真分页之后所有跳转都从这里走，为的是能在跳转前打一个"这是页内跳转"的标记。 */
+const NAV_KEY = 'facelogin.internal-nav';
+function markInternalNav(){
+  try { sessionStorage.setItem(NAV_KEY, String(Date.now())); } catch(e){}
+}
+function go(url){
+  markInternalNav();
+  location.assign(url);
+}
+/* 普通 <a> 点击也算页内跳转（capture 阶段，早于浏览器开始卸载页面）。
+   外链、新标签页、下载链接不算 —— 那些确实是"离开"。 */
+document.addEventListener('click', function(e){
+  const a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+  if (!a) return;
+  if (a.target === '_blank' || a.hasAttribute('download')) return;
+  const href = a.getAttribute('href') || '';
+  if (!href || href.charAt(0) === '#' || /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(href)) return;
+  markInternalNav();
+}, true);
+
+/* ---------------- 关闭页面 → 通知服务端退出并释放摄像头 ----------------
+   真分页之后，"页内跳转"和"关掉页面"在浏览器眼里是同一个事件，只能靠上面
+   那个短时效标记区分：标记新鲜（5 秒内）就跳过 bye。
+   两道兜底：① 服务端收到 bye 仍有宽限期，新页面一加载就会取消已排定的退出；
+   ② 实在漏掉一次，还有"长时间没有页面活动"的兜底退出（摄像头多亮一会儿）。
+   代价说清楚：点了链接又中途取消、然后立刻关页，这**一次** bye 会被跳过。 */
+let leavingDone = false;
+function leaving(){
+  if (leavingDone) return;   // pagehide 与 beforeunload 都会触发，只认第一次
+  leavingDone = true;
+  let internal = false;
+  try {
+    const t = parseInt(sessionStorage.getItem(NAV_KEY) || '0', 10);
+    if (t && Date.now() - t < 5000) internal = true;
+    sessionStorage.removeItem(NAV_KEY);
+  } catch(e){}
+  if (internal) return;      // 页内跳转：不是离开，别关服务
+  try { navigator.sendBeacon('/api/bye?t=' + encodeURIComponent(PAGE_TOKEN)); } catch(e){}
+}
+addEventListener('pagehide', leaving);
+addEventListener('beforeunload', leaving);
+
+/* 从后退缓存恢复时，这个页面又活了：重新武装离开通知、重新拉流、立刻心跳一次 */
+addEventListener('pageshow', function(e){
+  leavingDone = false;
+  if (e.persisted) bindStream(true);
+  refresh();
+});
+</script>
+{% block scripts %}{% endblock %}
+<script>
 refresh();
+setInterval(refresh, 2000);
 </script>
 </body>
 </html>

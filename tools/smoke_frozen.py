@@ -170,6 +170,16 @@ def probe_binary():
     status, _ = request("GET", "/", {"Host": HOST_HEADER})
     check("正常 Host 访问首页 => 200", status == 200, "got %d" % status)
 
+    # 真分页之后模板落在 _MEIPASS/templates/，由 server 用 paths.resource_path()
+    # 指过去。这一条专门验"包里也认得那个目录"，且页面不是空壳。
+    status, body = request("GET", "/login", {"Host": HOST_HEADER})
+    check("/login 也是真页面（多页路由与模板都进了包）",
+          status == 200 and b'name="page-token"' in body, "got %d" % status)
+
+    status, _ = request("GET", "/settings", {"Host": HOST_HEADER})
+    check("未登录访问 /settings => 302（状态机在服务端，包里同样生效）",
+          status == 302, "got %d" % status)
+
     status, _ = request("GET", "/", {"Host": "evil.com"})
     check("Host: evil.com => 403（DNS 重绑定防护在包里）",
           status == 403, "got %d" % status)

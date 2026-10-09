@@ -8,7 +8,8 @@ import time
 from datetime import datetime
 
 import cv2
-from flask import Flask, Response, jsonify, request, session
+from flask import (Flask, Response, jsonify, redirect, render_template, request,
+                   session)
 
 import db
 import liveness
@@ -531,7 +532,17 @@ def api_enroll():
     if err:
         return err
 
-    feats = engine.capture_many(count=3)
+    # count 是为了让页面能逐组采集、把 1/3 → 3/3 显示成**真实进度**，
+    # 而不是拿客户端计时器假装。默认 3 与原行为完全一致，老调用方不受影响。
+    raw = (request.get_json(silent=True) or {}).get("count", 3)
+    try:
+        count = int(raw)
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "invalid_value",
+                        "message": "count 需要是一个整数"})
+    count = max(1, min(3, count))
+
+    feats = engine.capture_many(count=count)
     if not feats:
         db.add_event(user["username"], "enroll", False, detail="no_face_detected")
         return jsonify({"ok": False, "error": "no_face_detected",
@@ -629,36 +640,124 @@ def api_threshold():
     return jsonify({"ok": True, "threshold": value, "message": "阈值已更新为 %.2f" % value})
 
 
-# ---------------------------------------------------------------- page
+# ---------------------------------------------------------------- 页面（真分页）
 
 # 模板是只读资源：源码运行时在 app/templates/，打包后由 --add-data 放到
 # PyInstaller 的解压目录里 —— 必须用 paths.resource_path() 取，不能用程序根。
-TEMPLATE_PATH = paths.resource_path("templates", "index.html")
+app.template_folder = paths.resource_path("templates")
+# 改完模板刷新即生效：Flask 默认只在 debug 下自动重载模板，
+# 而这里刻意要保住「改一行 HTML、刷新就能看到」的手感。
+app.config["TEMPLATES_AUTO_RELOAD"] = True
+app.jinja_env.auto_reload = True
+
+#: 上手流程的三步。步骤条由**服务端**渲染 —— 每张页面自己知道"我在第几步"，
+#: 不需要前端拿状态去猜。
+STEPS = ("注册账号", "录入人脸", "登录验证")
 
 
-def render_page():
-    """读取单文件 HTML 模板，并注入运行时提示。
+def _steps(step):
+    """step：当前进行到第几步（从 0 数）。-1 = 还没开始；3 = 三步都已完成。"""
+    return [{"label": label,
+             "index": i + 1,
+             "state": "done" if i < step else ("now" if i == step else "todo")}
+            for i, label in enumerate(STEPS)]
 
-    模板单独放在 app/templates/index.html，为的是拿到正常的 HTML / CSS 高亮与
-    格式化；它不引用任何 CDN、不经过任何构建步骤 —— 「clone 下来双击即用」
-    这条底线必须保住。
+
+def render_page(name, step=-1, title="", **ctx):
+    """渲染一张页面。
+
+    模板拆成 layout.html + 每页一个文件，用 Jinja2 继承 —— 它是 Flask 自带的，
+    零构建、离线可用，与本项目「不引 CDN、不引构建工具」这条底线不冲突。
+
+    注入值一律走 HTML（meta 与可见文本），**不写进 <script>** —— 这样内联 JS
+    始终是纯静态文本，node --check 还能继续当语法门禁。
     """
-    with open(TEMPLATE_PATH, "r", encoding="utf-8") as fh:
-        html = fh.read()
-    if AUTO_EXIT:
-        hint = ('<span class="chip exit"><i></i>关闭本页约 %.0f 秒后自动停止服务并释放摄像头</span>'
-                % EXIT_GRACE)
-    else:
-        hint = ""
-    html = html.replace("<!--AUTOEXIT-->", hint)
-    # 页面令牌注入：/api/stream 与 /api/bye 靠它认「这是本服务发出的页面」
-    return html.replace("<!--PAGETOKEN-->", PAGE_TOKEN)
+    return Response(render_template(
+        name,
+        token=PAGE_TOKEN,
+        port=PORT,
+        auto_exit=AUTO_EXIT,
+        grace_text="%.0f" % EXIT_GRACE,
+        steps=_steps(step),
+        stage=name.split(".")[0],
+        title=title,
+        **ctx), mimetype="text/html")
 
+
+def _landing_for(user):
+    """已登录的人此刻该待在哪张页面：没录人脸先去录入，否则去主控台。"""
+    if db.count_templates(user["id"]) == 0:
+        return "/enroll"
+    return "/console"
+
+
+# 下面六条路由合起来就是这套系统的状态机。**能不能进某张页面由服务端判定**，
+# 不满足条件就重定向到该去的地方 —— 这是真分页最大的收益：用户不可能落到一张
+# 自己用不了的页面上，也就不需要靠前端置灰去"提示"他。
+# 每张页面只干一件事，页面之间用跳转衔接（完成后自动进入下一张）。
 
 @app.route("/")
-def index():
-    # mimetype 只给 text/html，charset 由 Flask 自动补上（否则会重复两遍）
-    return Response(render_page(), mimetype="text/html")
+def page_welcome():
+    user = logged_in_user()
+    if user is not None:
+        return redirect(_landing_for(user))
+    return render_page("welcome.html", title="开始",
+                       has_any_user=db.count_users() > 0)
+
+
+@app.route("/register")
+def page_register():
+    user = logged_in_user()
+    if user is not None:
+        return redirect(_landing_for(user))
+    return render_page("register.html", step=0, title="创建账号")
+
+
+@app.route("/login")
+def page_login():
+    user = logged_in_user()
+    if user is not None:
+        return redirect(_landing_for(user))
+    has_any = db.count_users() > 0
+    # 本机连账号都还没有时把步骤条停在第 1 步 —— 否则会显示"注册已完成"。
+    return render_page("login.html", step=2 if has_any else 0, title="登录",
+                       has_any_user=has_any, liveness=LIVENESS_ENABLED)
+
+
+@app.route("/enroll")
+def page_enroll():
+    user = logged_in_user()
+    if user is None:
+        return redirect("/login")
+    return render_page("enroll.html", step=1, title="录入人脸",
+                       cam_note="采集中", show_guide=True,
+                       username=user["username"],
+                       samples=db.count_templates(user["id"]))
+
+
+@app.route("/console")
+def page_console():
+    user = logged_in_user()
+    if user is None:
+        return redirect("/login")
+    samples = db.count_templates(user["id"])
+    if samples == 0:
+        # 没人脸模板就没有"主控台"可言，直接送到该去的地方
+        return redirect("/enroll")
+    return render_page("console.html", step=3, title="主控台",
+                       username=user["username"], samples=samples,
+                       threshold=THRESHOLD["value"])
+
+
+@app.route("/settings")
+def page_settings():
+    user = logged_in_user()
+    if user is None:
+        return redirect("/login")
+    return render_page("settings.html", step=3, title="设置",
+                       username=user["username"],
+                       samples=db.count_templates(user["id"]),
+                       threshold=THRESHOLD["value"])
 
 
 

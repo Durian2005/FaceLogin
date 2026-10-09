@@ -166,6 +166,31 @@ check("令牌确实落在 meta 的 content 里（不是裸文本）",
 check("模板其余部分未被破坏（自动退出提示位仍在处理）",
       "<!--AUTOEXIT-->" not in html)
 
+# 真分页之后模板换成 Jinja 继承，`<!--AUTOEXIT-->` 这个占位符本身就不存在了
+# —— 上面那句会**永远为真**、等于空转。所以这里补一条真正检查渲染结果的断言，
+# 而不是让一句空转的断言留在套件里假装覆盖了。
+check("首页是多页之一（含步骤条，不是空壳）", 'class="steps"' in html)
+if server.AUTO_EXIT:
+    check("首页确实渲染出「关页即停止服务」提示",
+          "自动停止服务" in html)
+else:
+    check("AUTO_EXIT 关闭时不渲染退出提示", "自动停止服务" not in html)
+
+# ---------------------------------------------------------------- 真分页路由
+# 这套系统的状态机现在跑在**服务端**：能不能进某张页面由它判定，走不进去就
+# 重定向到该去的地方。这一节就是那道门禁的看门人。
+print("\n[4b] 真分页路由：状态机在服务端")
+OPEN_WHEN_ANON = ("/", "/register", "/login")
+for path in ("/", "/register", "/login", "/enroll", "/console", "/settings"):
+    r = client.get(path, follow_redirects=False)
+    if path in OPEN_WHEN_ANON:
+        check("未登录可直接打开 %-10s => 200" % path, r.status_code == 200,
+              "got %d" % r.status_code)
+    else:
+        check("未登录访问 %-10s => 302 /login" % path,
+              r.status_code == 302 and r.headers.get("Location", "").endswith("/login"),
+              "%d %s" % (r.status_code, r.headers.get("Location")))
+
 resp = client.post("/api/register",
                    json={"username": "sec_probe", "password": "Probe#12345"},
                    headers={"Origin": "http://evil.com"})
@@ -178,6 +203,18 @@ resp = client.post("/api/register",
 check("同源 Origin 注册 => 成功（且已登录）",
       resp.status_code == 200 and resp.get_json().get("ok"),
       str(resp.get_json())[:80])
+
+# 已登录但这个人还没录人脸：主控台不该给他一张空页面，而应送回录入页。
+r = client.get("/console", follow_redirects=False)
+check("已登录但 0 组模板 => /console 送回 /enroll",
+      r.status_code == 302 and r.headers.get("Location", "").endswith("/enroll"),
+      "%d %s" % (r.status_code, r.headers.get("Location")))
+r = client.get("/enroll", follow_redirects=False)
+check("已登录 => /enroll 可进入", r.status_code == 200, "got %d" % r.status_code)
+r = client.get("/register", follow_redirects=False)
+check("已登录再访问 /register => 被送回流程内（不会重复注册）",
+      r.status_code == 302 and r.headers.get("Location", "").endswith("/enroll"),
+      "%d %s" % (r.status_code, r.headers.get("Location")))
 
 # ---------------------------------------------------------------- 摄像头画面
 

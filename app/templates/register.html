@@ -1,0 +1,51 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<main class="narrow">
+  <section class="card">
+    <div class="card-head"><h2>第 1 步 · 创建账号</h2></div>
+
+    <label for="ru">用户名</label>
+    <input id="ru" placeholder="3–32 位字母、数字、下划线、点、连字符"
+           autocomplete="off" autofocus>
+    <label for="rp">密码</label>
+    <input id="rp" type="password" placeholder="至少 6 位" autocomplete="new-password">
+    <label for="rp2">确认密码</label>
+    <input id="rp2" type="password" placeholder="再输入一遍，避免打错" autocomplete="new-password">
+
+    <p class="nextstep" id="nextstep">
+      创建成功后会自动登录，并直接进入第 2 步「录入人脸」—— 不用重新输一遍用户名密码。
+    </p>
+
+    <div class="actions">
+      <button class="btn btn-primary" id="btn-reg" data-busy="正在创建…" onclick="register(this)">创建账号</button>
+      <a class="btn" href="/login">已有账号，去登录</a>
+    </div>
+
+    <p class="hint">
+      口令用 Argon2id 哈希后存入本机 SQLite，<b>绝不保存明文</b>。
+      同一账号连续失败 3 次会锁定 3 分钟，口令登录与人脸登录共用这个计数。
+    </p>
+  </section>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function register(btn){ guard(async () => {
+  const username = $('ru').value.trim();
+  const pwd = $('rp').value;
+  if (pwd !== $('rp2').value){
+    toast('两次输入的密码不一致，请检查一下', 'warn');
+    return;
+  }
+  const r = await post('/api/register', {username: username, password: pwd});
+  toast(textOf(r), toneOf(r));
+  if (!r.ok) return;
+  $('rp').value = '';    // 口令不留在输入框里
+  $('rp2').value = '';
+  $('ru').value = '';
+  go('/enroll');         // 服务端知道该去哪：注册即登录，下一步就是录入
+}, btn); }
+</script>
+{% endblock %}

@@ -1,0 +1,65 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<main class="page">
+  <div class="grid">
+
+    <div class="col">
+      {% include "_camera.html" %}
+    </div>
+
+    <div class="col">
+      <section class="card">
+        <div class="card-head">
+          <h2>{% if has_any_user %}欢迎回来{% else %}第一次使用{% endif %}</h2>
+        </div>
+
+        <p class="hint" style="margin-top:0">
+          {% if has_any_user %}
+          本机已有账号。登录后可以查看状态、重新录入人脸或调整阈值。
+          {% else %}
+          本机还没有任何账号。创建一个账号即可开始 —— 注册成功后会自动登录，
+          并直接进入下一步「录入人脸」，全程三步。
+          {% endif %}
+        </p>
+
+        <div class="choice">
+          {% if has_any_user %}
+          <a class="choice-link primary" href="/login">
+            <b>登录</b><span>用已注册的账号进入，支持人脸或密码</span>
+          </a>
+          <a class="choice-link" href="/register">
+            <b>创建一个新账号</b><span>用户名 + 口令，随后录入人脸</span>
+          </a>
+          {% else %}
+          <a class="choice-link primary" href="/register">
+            <b>创建账号</b><span>这是第一次使用，从这里开始</span>
+          </a>
+          <a class="choice-link" href="/login">
+            <b>我本机已经有账号</b><span>直接去登录页</span>
+          </a>
+          {% endif %}
+        </div>
+
+        <p class="hint">
+          为什么账号先行：人脸只做 <b>1:1 比对</b>（只跟本人模板比），不做全库检索 ——
+          这样误识率和耗时都不随账号数量增长。
+        </p>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>这套系统会怎么走</h2></div>
+        <p class="hint" style="margin-top:0">
+          <b>① 注册账号</b> → <b>② 录入人脸</b>（采集 3 组，可重复） → <b>③ 登录验证</b>
+          （人脸需完成一次随机动作挑战）。三步走完之后，日常就只剩第 ③ 步。
+        </p>
+        <p class="hint">
+          数据全部留在本机 SQLite 里，只存人脸特征向量和口令哈希 ——
+          <b>不存原图、不存视频</b>。
+        </p>
+      </section>
+    </div>
+
+  </div>
+</main>
+{% endblock %}

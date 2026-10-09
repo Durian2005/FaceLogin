@@ -1,0 +1,90 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<main class="narrow">
+
+  <section class="card">
+    <div class="card-head">
+      <h2>阈值校准</h2>
+      <span class="badge" id="badge-thr">-</span>
+    </div>
+
+    <label for="thrv">相似度阈值</label>
+    <input id="thrv" type="number" step="0.01" min="0.2" max="0.95" value="{{ threshold }}">
+    <label for="thrpwd">密码<span style="color:var(--tx-3)">（只有调低阈值时才必填）</span></label>
+    <input id="thrpwd" type="password" placeholder="调低阈值等于放宽认人条件" autocomplete="current-password">
+
+    <div class="actions">
+      <button class="btn" id="btn-thr" data-busy="正在更新…" onclick="setThreshold(this)">更新阈值</button>
+    </div>
+
+    <p class="hint">
+      阈值越高越严格。为什么只拦"调低"：调低阈值 = 放宽认人条件，是一次<b>安全降级</b>，
+      所以要求重新输入本人密码确认；调高是收紧，不设门槛。
+    </p>
+    <p class="hint">
+      量化依据见 <code>docs/threshold-report.md</code>（LFW 1200 图 / 300 身份标定）：
+      EER 0.73% @ 0.309，按误接受率 ≤ 0.1% 推荐 0.375。本机默认 0.50 偏严，
+      对应误拒绝约 9.4% —— 被拒时用密码登录即可。
+    </p>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><h2>危险操作</h2></div>
+
+    <details class="danger">
+      <summary>删除我的人脸数据</summary>
+      <p class="hint">
+        人脸模板属于敏感生物特征信息。删除后该账号<b>无法再用人脸登录</b>，只能改用密码；
+        重新采集即可恢复。此操作需要再次输入密码确认。
+      </p>
+      <label for="delpwd">密码</label>
+      <input id="delpwd" type="password" placeholder="输入当前账号的密码" autocomplete="current-password">
+      <div class="actions">
+        <button class="btn btn-danger btn-sm" id="btn-del" data-busy="正在删除…" onclick="deleteFace(this)">确认删除全部模板</button>
+      </div>
+    </details>
+  </section>
+
+  <div class="actions">
+    <a class="btn" href="/console">返回主控台</a>
+  </div>
+
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function setThreshold(btn){ guard(async () => {
+  const r = await post('/api/threshold', {
+    value: parseFloat($('thrv').value),
+    password: $('thrpwd').value
+  });
+  toast(textOf(r), toneOf(r));
+  if (r.ok) $('thrpwd').value = '';
+}, btn); }
+
+function deleteFace(btn){ guard(async () => {
+  if (!confirm('确定删除你的人脸模板吗？删除后需重新录入才能人脸登录。')) return;
+  const r = await post('/api/face/delete', {password: $('delpwd').value});
+  toast(textOf(r), toneOf(r));
+  $('delpwd').value = '';
+  if (r.ok) go('/enroll');   // 删干净了就没有模板可用，服务端也会把人送回录入页
+}, btn); }
+
+function onState(s){
+  const badge = $('badge-thr');
+  if (badge) badge.textContent = '当前 ' + s.threshold;
+  const box = $('thrv');
+  // 只在用户没在改这个框的时候同步，免得把他输了一半的数字冲掉
+  if (box && document.activeElement !== box) box.value = s.threshold;
+  if (!s.logged_in){
+    setLocked('btn-thr', false, '需要先登录');
+    setLocked('btn-del', false, '需要先登录');
+  } else {
+    setLocked('btn-thr', true);
+    setLocked('btn-del', true);
+  }
+}
+</script>
+{% endblock %}

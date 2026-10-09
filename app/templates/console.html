@@ -1,0 +1,99 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<main class="page">
+  <div class="grid">
+
+    <div class="col">
+      <section class="card">
+        <div class="card-head">
+          <h2>当前账号</h2>
+          <span class="badge" id="badge-session">已登录</span>
+        </div>
+        <div class="metrics">
+          <div class="metric mt-lg"><span>当前用户</span><b id="who">{{ username }}</b></div>
+          <div class="metric mt-lg"><span>人脸模板</span><b id="samples">{{ samples }} 组</b></div>
+          <div class="metric"><span>相似度阈值</span><b id="thr">{{ threshold }}</b></div>
+          <div class="metric"><span>口令哈希</span><b id="pwd">-</b></div>
+          <div class="metric"><span>活体检测</span><b id="livemode">-</b></div>
+        </div>
+
+        <p class="nextstep ok" id="nextstep">正在读取状态…</p>
+
+        <div class="actions">
+          <button class="btn" id="btn-enroll" onclick="go('/enroll')">重新录入人脸</button>
+          <a class="btn" href="/settings">阈值校准 / 删除人脸数据</a>
+          <button class="btn" id="btn-logout" data-busy="正在退出…" onclick="logout(this)">退出登录</button>
+        </div>
+
+        <p class="hint">
+          退出登录后回到欢迎页。<b>关闭所有页面约 5 秒后服务会自动停止并释放摄像头</b>
+          —— 不需要额外执行停止脚本。
+        </p>
+      </section>
+    </div>
+
+    <div class="col">
+      <section class="card">
+        <div class="card-head">
+          <h2>最近记录</h2>
+          <span class="badge" id="badge-audit">-</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>时间</th><th>方式</th><th>结果</th><th>相似度</th><th>说明</th></tr></thead>
+            <tbody id="audit"><tr><td colspan="5" class="empty">正在读取…</td></tr></tbody>
+          </table>
+        </div>
+        <p class="hint">
+          只显示当前账号自己的记录。每次注册、登录、锁定、录入、删除都会写入，
+          并带一条哈希链（可被 <code>tools/verify_audit_chain.py</code> 校验）。
+        </p>
+      </section>
+    </div>
+
+  </div>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadAudit(){
+  const body = $('audit');
+  if (!body) return;
+  try {
+    const a = await (await fetch('/api/audit?limit=15')).json();
+    if (!a.ok){ return; }
+    body.innerHTML = a.events.length
+      ? a.events.map(e =>
+          '<tr><td>' + e.time + '</td><td>' + e.method + '</td><td class="' + (e.success ? 'y' : 'n') + '">' +
+          (e.success ? '成功' : '失败') + '</td><td>' + (e.similarity ?? '-') + '</td><td>' + (e.detail || '') + '</td></tr>'
+        ).join('')
+      : '<tr><td colspan="5" class="empty">暂无记录 —— 登录、录入、动作挑战都会记在这里</td></tr>';
+    const badge = $('badge-audit');
+    if (badge) badge.textContent = a.events.length + ' 条';
+  } catch(e){ /* 服务正在退出时忽略 */ }
+}
+
+function logout(btn){ guard(async () => {
+  const r = await post('/api/logout');
+  toast(textOf(r), 'ok');
+  go('/');
+}, btn); }
+
+function onState(s){
+  const step = $('nextstep');
+  if (!step) return;
+  if (!s.logged_in){
+    step.textContent = '登录态已失效 —— 正在回到登录页…';
+    step.className = 'nextstep warn';
+    return;
+  }
+  step.textContent = '已就绪：' + s.face_samples + ' 组人脸模板可用，可以直接人脸登录。';
+  step.className = 'nextstep ok';
+}
+
+loadAudit();
+setInterval(loadAudit, 10000);
+</script>
+{% endblock %}
