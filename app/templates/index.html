@@ -183,6 +183,39 @@ input[type=number]{font-variant-numeric:tabular-nums}
 .actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:14px}
 body.busy .btn{pointer-events:none;opacity:.6}
 
+/* ---------------- 未解锁的入口 ---------------- */
+/* 置灰而不是"能点但报错"：原因写在 title 里，用户不必点了才知道做不了 */
+.btn:disabled{cursor:not-allowed;opacity:.42;filter:grayscale(.4)}
+.btn:disabled:hover{background:rgba(255,255,255,.055);filter:grayscale(.4)}
+input:disabled{opacity:.5;cursor:not-allowed}
+
+/* ---------------- 按钮级进行中 ---------------- */
+/* 把"正在发生什么"显示在按钮自己身上，而不是只把整页调灰 */
+.spin{
+  display:inline-block;width:10px;height:10px;margin-right:7px;vertical-align:-1px;
+  border:2px solid rgba(255,255,255,.32);border-top-color:rgba(255,255,255,.92);
+  border-radius:50%;animation:spin .7s linear infinite;
+}
+.btn-primary .spin{border-color:rgba(6,18,27,.28);border-top-color:rgba(6,18,27,.9)}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ---------------- 下一步引导条 ----------------
+   全页唯一一个"你现在该做什么"，替代散落各处的零碎提示 */
+.nextstep{
+  display:flex;align-items:flex-start;gap:8px;
+  margin:13px 0 0;padding:9px 11px;border-radius:10px;
+  font-size:12px;line-height:1.6;
+  border:1px solid var(--border);background:rgba(255,255,255,.03);color:var(--tx-2);
+}
+.nextstep::before{
+  content:"";flex:none;width:6px;height:6px;margin-top:6px;border-radius:50%;
+  background:var(--tx-3);
+}
+.nextstep.warn{border-color:rgba(251,191,36,.32);background:rgba(251,191,36,.07);color:#fcd34d}
+.nextstep.warn::before{background:var(--warn)}
+.nextstep.ok{border-color:rgba(52,211,153,.3);background:rgba(52,211,153,.06);color:#a7f3d0}
+.nextstep.ok::before{background:var(--ok)}
+
 /* ---------------- 提示文字 ---------------- */
 .hint{font-size:12px;color:var(--tx-3);line-height:1.65;margin:11px 0 0}
 
@@ -284,9 +317,10 @@ td.empty{text-align:center;color:var(--tx-3);padding:18px 9px;white-space:normal
         <div class="metric mt-lg"><span>当前用户</span><b id="who">未登录</b></div>
         <div class="metric mt-lg"><span>人脸模板</span><b id="samples">0 组</b></div>
       </div>
+      <p class="nextstep" id="nextstep">正在读取状态…</p>
       <div class="actions">
-        <button class="btn btn-primary" onclick="enroll()">录入人脸</button>
-        <button class="btn" onclick="logout()">退出登录</button>
+        <button class="btn btn-primary" id="btn-enroll" data-busy="正在采集 3 组…" onclick="enroll(this)">录入人脸</button>
+        <button class="btn" id="btn-logout" data-busy="正在退出…" onclick="logout(this)">退出登录</button>
       </div>
       <details class="danger">
         <summary>删除我的人脸数据</summary>
@@ -294,7 +328,7 @@ td.empty{text-align:center;color:var(--tx-3);padding:18px 9px;white-space:normal
         <label for="delpwd">密码</label>
         <input id="delpwd" type="password" placeholder="输入当前账号的密码" autocomplete="current-password">
         <div class="actions">
-          <button class="btn btn-danger btn-sm" onclick="deleteFace()">确认删除全部模板</button>
+          <button class="btn btn-danger btn-sm" id="btn-del" data-busy="正在删除…" onclick="deleteFace(this)">确认删除全部模板</button>
         </div>
       </details>
     </section>
@@ -308,9 +342,10 @@ td.empty{text-align:center;color:var(--tx-3);padding:18px 9px;white-space:normal
       <label for="lp">密码</label>
       <input id="lp" type="password" placeholder="密码登录时填写" autocomplete="current-password">
       <div class="actions">
-        <button class="btn btn-primary" onclick="loginFace()">人脸登录</button>
-        <button class="btn" onclick="loginPassword()">密码登录</button>
+        <button class="btn btn-primary" id="btn-face" data-busy="等待你完成动作…" onclick="loginFace(this)">人脸登录</button>
+        <button class="btn" id="btn-pw" data-busy="正在校验…" onclick="loginPassword(this)">密码登录</button>
       </div>
+      <p class="nextstep" id="acctstate">正在读取状态…</p>
       <p class="hint">人脸登录为「账号先行 + 1:1 比对」，只与本人模板比对，无需遍历所有用户。登录时需按提示完成一次随机动作挑战 —— 这条能挡住静态照片和事先录好的视频，但挡不住实时配合旋转的照片或屏幕回放。密码登录可随时回退。</p>
     </section>
 
@@ -321,7 +356,7 @@ td.empty{text-align:center;color:var(--tx-3);padding:18px 9px;white-space:normal
       <label for="rp">密码</label>
       <input id="rp" type="password" placeholder="至少 6 位" autocomplete="new-password">
       <div class="actions">
-        <button class="btn btn-primary" onclick="register()">注册并登录</button>
+        <button class="btn btn-primary" id="btn-reg" data-busy="正在创建…" onclick="register(this)">注册并登录</button>
       </div>
       <p class="hint">注册成功后请立刻录入人脸，否则该账号只能使用密码登录。</p>
     </section>
@@ -336,7 +371,7 @@ td.empty{text-align:center;color:var(--tx-3);padding:18px 9px;white-space:normal
       <label for="thrpwd">密码（仅调低阈值时必填）</label>
       <input id="thrpwd" type="password" placeholder="调低阈值等于放宽认人条件" autocomplete="current-password">
       <div class="actions">
-        <button class="btn" onclick="setThreshold()">更新阈值</button>
+        <button class="btn" id="btn-thr" data-busy="正在更新…" onclick="setThreshold(this)">更新阈值</button>
       </div>
       <p class="hint">阈值越高越严格。<b>调低阈值会放宽人脸判定，需要输入密码确认</b>；调高不设门槛。量化依据见 <code>docs/threshold-report.md</code>。</p>
     </section>
@@ -349,7 +384,7 @@ td.empty{text-align:center;color:var(--tx-3);padding:18px 9px;white-space:normal
       <div class="table-wrap">
         <table>
           <thead><tr><th>时间</th><th>方式</th><th>结果</th><th>相似度</th><th>说明</th></tr></thead>
-          <tbody id="audit"><tr><td colspan="5" class="empty">登录后可见</td></tr></tbody>
+          <tbody id="audit"><tr><td colspan="5" class="empty">请先登录 —— 登录后可查看自己的注册、登录、锁定、录入记录</td></tr></tbody>
         </table>
       </div>
     </section>
@@ -392,32 +427,84 @@ async function post(url, body){
   });
   return r.json();
 }
-async function guard(fn){
+async function guard(fn, btn){
   document.body.classList.add('busy');
+  const orig = btn ? btn.innerHTML : null;
+  if (btn){
+    // 进行中状态挂在按钮自己身上（文案取自 data-busy），
+    // 而不是只把整页调灰 —— 用户才看得清"是哪一步在跑"。
+    btn.dataset.running = '1';
+    btn.innerHTML = '<span class="spin"></span>' + (btn.dataset.busy || '处理中…');
+    btn.disabled = true;
+  }
   try { await fn(); }
   catch(e){ toast('请求失败：' + e, 'bad'); }
   finally {
+    if (btn){
+      delete btn.dataset.running;
+      btn.innerHTML = orig;
+      btn.disabled = false;
+    }
     document.body.classList.remove('busy');
     refresh();
   }
 }
+
+/* 按登录态解锁 / 锁定入口。
+   锁定时把原因写进 title —— 让用户不必"点一下才知道做不了"。
+   正在执行中的按钮跳过：否则 2 秒一次的状态轮询会把它"解锁"回来。 */
+function setLocked(id, ok, why){
+  const el = $(id);
+  if (!el || el.dataset.running === '1') return;
+  el.disabled = !ok;
+  el.title = ok ? '' : (why || '');
+}
 /* 锁定与失败用同一套配色：locked 走 warn，其余失败走 bad */
 const toneOf = r => r.ok ? 'ok' : (r.error === 'locked' ? 'warn' : 'bad');
 
-/* ---------------- 业务动作 ---------------- */
-function register(){ guard(async () => {
-  toast('正在注册…');
-  const r = await post('/api/register', {username: $('ru').value.trim(), password: $('rp').value});
-  toast(r.message || r.error, toneOf(r));
-  if (r.ok) $('lu').value = r.username;
-}); }
+/* ---------------- 错误码 → 中文 ----------------
+   后端有一部分响应只带 error 码、不带 message（最典型的是未登录时的
+   `login_required`）。原先的 `r.message || r.error` 会把这串英文码直接
+   甩给用户，用户看到 "login_required" 完全不知道下一步该做什么。
+   这里统一兜底成「能照着做」的中文。message 优先，没有才查这张表。 */
+const ERR_TEXT = {
+  login_required:      '这一步需要先登录 —— 请先在右侧「登录」或「注册新账号」',
+  invalid_value:       '阈值请填一个数字（0.20 – 0.95）',
+  out_of_range:        '阈值请设在 0.20 到 0.95 之间',
+  missing_field:       '请把必填项填写完整',
+  bad_token:           '页面凭证已失效，请刷新页面后重试',
+  bad_host:            '请求来源不被允许，请用 127.0.0.1:5000 打开本页',
+  bad_origin:          '请求来源不被允许，请刷新页面后重试',
+  no_face_detected:    '没有检测到人脸 —— 请正对摄像头、光线均匀，画面里只留一张脸',
+  no_template:         '这个账号还没有录入人脸，请先登录后在左侧「录入人脸」',
+  camera_read_failed:  '读取摄像头失败，请检查摄像头是否被其它程序占用',
+  password_required:   '这一步需要输入密码确认',
+  liveness_required:   '已开启活体检测，请点「人脸登录」完成动作挑战',
+  liveness_disabled:   '活体检测已关闭',
+  not_enough_samples:  '采样帧数不足，请保持人脸在画面中再试',
+  action_not_returned: '动作已识别，但没取到正面画面 —— 做完动作后请转回正对摄像头',
+  liveness_timeout:    '没有检测到指定动作，请照着提示转动头部再试',
+  face_changed:        '画面中的人脸位置发生突变，动作挑战未通过',
+  unknown_challenge:   '挑战已失效，请重新点「人脸登录」',
+};
+const textOf = r => r.message || ERR_TEXT[r.error]
+  || ('操作未完成（' + (r.error || '未知错误') + '）');
 
-function loginPassword(){ guard(async () => {
-  toast('正在校验密码…');
+/* ---------------- 业务动作 ---------------- */
+function register(btn){ guard(async () => {
+  const r = await post('/api/register', {username: $('ru').value.trim(), password: $('rp').value});
+  toast(textOf(r), toneOf(r));
+  if (r.ok){
+    $('lu').value = r.username;   // 回填用户名，用户接着登录时不用再敲一遍
+    $('rp').value = '';           // 注册密码不再留在输入框里
+  }
+}, btn); }
+
+function loginPassword(btn){ guard(async () => {
   const r = await post('/api/login/password', {username: $('lu').value.trim(), password: $('lp').value});
-  toast(r.message || r.error, toneOf(r));
+  toast(textOf(r), toneOf(r));
   if (r.ok) $('lp').value = '';
-}); }
+}, btn); }
 
 /* ---------------- 活体动作挑战浮层 ---------------- */
 let liveTimer = null;
@@ -443,14 +530,13 @@ function faceResultText(r){
   const extra = r.cosine !== undefined
     ? '（相似度 ' + r.cosine + ' / 阈值 ' + r.threshold + '，' + Math.round(r.ms || 0) + 'ms）'
     : '';
-  return (r.message || r.error) + extra;
+  return textOf(r) + extra;
 }
 
-function loginFace(){ guard(async () => {
+function loginFace(btn){ guard(async () => {
   const username = $('lu').value.trim();
   if (!username){ toast('请先填写用户名', 'warn'); return; }
 
-  toast('正在准备动作挑战…');
   const s = await post('/api/liveness/start', {});
 
   if (!s.ok && s.error === 'liveness_disabled'){
@@ -459,7 +545,7 @@ function loginFace(){ guard(async () => {
     toast(faceResultText(r), toneOf(r));
     return;
   }
-  if (!s.ok){ toast(s.message || s.error, 'bad'); return; }
+  if (!s.ok){ toast(textOf(s), 'bad'); return; }
 
   showLive(s.action_text, s.hint, s.timeout);
   let r;
@@ -469,34 +555,33 @@ function loginFace(){ guard(async () => {
     hideLive();
   }
   toast(faceResultText(r), toneOf(r));
-}); }
+}, btn); }
 
-function enroll(){ guard(async () => {
-  toast('正在采集 3 组样本，请保持正对摄像头…');
+function enroll(btn){ guard(async () => {
   const r = await post('/api/enroll');
-  toast(r.message || r.error, toneOf(r));
-}); }
+  toast(textOf(r), toneOf(r));
+}, btn); }
 
-function deleteFace(){ guard(async () => {
+function deleteFace(btn){ guard(async () => {
   if (!confirm('确定删除你的人脸模板吗？删除后需重新录入才能人脸登录。')) return;
   const r = await post('/api/face/delete', {password: $('delpwd').value});
-  toast(r.message || r.error, toneOf(r));
+  toast(textOf(r), toneOf(r));
   $('delpwd').value = '';
-}); }
+}, btn); }
 
-function logout(){ guard(async () => {
+function logout(btn){ guard(async () => {
   const r = await post('/api/logout');
-  toast(r.message, 'ok');
-}); }
+  toast(textOf(r), 'ok');
+}, btn); }
 
-function setThreshold(){ guard(async () => {
+function setThreshold(btn){ guard(async () => {
   const r = await post('/api/threshold', {
     value: parseFloat($('thrv').value),
     password: $('thrpwd').value
   });
-  toast(r.message || r.error, toneOf(r));
+  toast(textOf(r), toneOf(r));
   if (r.ok) $('thrpwd').value = '';
-}); }
+}, btn); }
 
 /* ---------------- 状态轮询（同时充当服务端心跳）---------------- */
 async function refresh(){
@@ -521,6 +606,52 @@ async function refresh(){
     $('badge-session').textContent = s.logged_in ? ('已登录 · ' + s.username) : '未登录';
     $('badge-session').classList.toggle('on', !!s.logged_in);
 
+    /* --- 入口解锁 ---
+       不满足条件的入口直接置灰，并把原因写进 title。
+       原先这些按钮未登录时照样能点，点了只会弹出一句 login_required。 */
+    const inSession = !!s.logged_in;
+    setLocked('btn-enroll', inSession, '需要先登录才能录入人脸');
+    setLocked('btn-logout', inSession, '当前未登录，无需退出');
+    setLocked('btn-del',    inSession, '需要先登录才能删除人脸数据');
+    setLocked('btn-thr',    inSession, '需要先登录才能修改阈值');
+    setLocked('thrv',       inSession, '需要先登录才能修改阈值');
+    setLocked('thrpwd',     inSession, '需要先登录才能修改阈值');
+    const delpwd = $('delpwd');
+    if (delpwd) delpwd.disabled = !inSession;
+
+    /* --- 下一步引导 ---
+       全页唯一一个"你现在该做什么"，替代原先散落在各处的零碎提示。 */
+    const samples = s.face_samples || 0;
+    const step = $('nextstep');
+    if (step){
+      if (!inSession){
+        if (s.has_any_user){
+          step.textContent = '当前未登录 —— 在右侧「登录」填用户名即可（人脸登录需先完成一次动作挑战）';
+          step.className = 'nextstep warn';
+        } else {
+          step.textContent = '本机还没有任何账号 —— 请先在右侧「注册新账号」创建一个，创建成功后会自动登录';
+          step.className = 'nextstep warn';
+        }
+      } else if (samples === 0){
+        step.textContent = '下一步：点上面的「录入人脸」采集 3 组样本 —— 完成后人脸登录才可用';
+        step.className = 'nextstep warn';
+      } else {
+        step.textContent = '已就绪：已录入 ' + samples + ' 组人脸模板，可以直接人脸登录';
+        step.className = 'nextstep ok';
+      }
+    }
+
+    /* --- 账号存在性 ---
+       只提示"有没有账号"，不回显账号名 —— 否则等于把本机账号名暴露给
+       任何能打开这个页面的人（一次免费的账号枚举）。 */
+    const acc = $('acctstate');
+    if (acc){
+      acc.textContent = s.has_any_user
+        ? '本机已有账号，直接填用户名登录即可'
+        : '本机还没有账号，请先在下方「注册新账号」创建';
+      acc.className = 'nextstep';
+    }
+
     if (s.logged_in){
       const a = await (await fetch('/api/audit?limit=15')).json();
       if (a.ok){
@@ -529,11 +660,11 @@ async function refresh(){
               '<tr><td>' + e.time + '</td><td>' + e.method + '</td><td class="' + (e.success ? 'y' : 'n') + '">' +
               (e.success ? '成功' : '失败') + '</td><td>' + (e.similarity ?? '-') + '</td><td>' + (e.detail || '') + '</td></tr>'
             ).join('')
-          : '<tr><td colspan="5" class="empty">暂无记录</td></tr>';
+          : '<tr><td colspan="5" class="empty">暂无记录 —— 登录、录入、动作挑战都会记在这里</td></tr>';
         $('badge-audit').textContent = a.events.length + ' 条';
       }
     } else {
-      $('audit').innerHTML = '<tr><td colspan="5" class="empty">登录后可见</td></tr>';
+      $('audit').innerHTML = '<tr><td colspan="5" class="empty">请先登录 —— 登录后可查看自己的注册、登录、锁定、录入记录</td></tr>';
       $('badge-audit').textContent = '登录后可见';
     }
   } catch(e){ /* 服务正在退出时忽略 */ }

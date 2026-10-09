@@ -143,6 +143,16 @@ def list_users():
         ).fetchall()
 
 
+def count_users():
+    """本机账号总数。只读，供页面判断「该引导注册还是引导登录」。
+
+    注意：这里刻意**不返回用户名列表**。未登录时把本机账号名回显到页面上，
+    等于对任何能打开这个页面的人做了一次账号枚举 —— 得不偿失。
+    """
+    with connect() as conn:
+        return conn.execute("SELECT COUNT(*) AS c FROM users").fetchone()["c"]
+
+
 def set_last_login(user_id):
     with connect() as conn:
         conn.execute(

@@ -251,6 +251,9 @@ def api_state():
         "logged_in": user is not None,
         "username": user["username"] if user else None,
         "face_samples": db.count_templates(user["id"]) if user else 0,
+        # 未登录时 face_samples 恒为 0，光靠它分不清「本机没账号」和「只是没登录」。
+        # 页面需要这个布尔才能决定是引导注册还是引导登录。只增字段，不动上面任何一个。
+        "has_any_user": db.count_users() > 0,
     })
 
 
